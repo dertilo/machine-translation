@@ -6,7 +6,63 @@
 
 # [fairseq-mt](https://github.com/pytorch/fairseq/tree/master/examples/translation)
 [also see](https://modelzoo.co/model/fairseq-py)
+## setup
+```shell script
+conda create -n fairseq python=3.7 -y
+conda activate fairseq
+cd fairseq && OMP_NUM_THREADS=4 pip install -e .
+pip install sacremoses
+```
+## IWSLT'14 German to English [see](https://github.com/pytorch/fairseq/tree/master/examples/translation)
+```shell script
+[de] Dictionary: 7432 types
+[de] examples/translation/iwslt14.tokenized.de-en/train.de: 12928 sents, 320235 tokens, 0.0% replaced by <unk>
+[de] Dictionary: 7432 types
+[de] examples/translation/iwslt14.tokenized.de-en/valid.de: 587 sents, 14527 tokens, 0.145% replaced by <unk>
+[de] Dictionary: 7432 types
+[de] examples/translation/iwslt14.tokenized.de-en/test.de: 6750 sents, 163940 tokens, 0.28% replaced by <unk>
+[en] Dictionary: 5912 types
+[en] examples/translation/iwslt14.tokenized.de-en/train.en: 12928 sents, 311593 tokens, 0.0% replaced by <unk>
+[en] Dictionary: 5912 types
+[en] examples/translation/iwslt14.tokenized.de-en/valid.en: 587 sents, 14324 tokens, 0.0977% replaced by <unk>
+[en] Dictionary: 5912 types
+[en] examples/translation/iwslt14.tokenized.de-en/test.en: 6750 sents, 159240 tokens, 0.139% replaced by <unk>
+```
+* on __frontend__ Download and prepare the data*
+```shell script
+cd examples/translation/
+bash prepare-iwslt14.sh
+cd ../..
+```
+* on __node__ Preprocess/binarize the data
+```
+TEXT=examples/translation/iwslt14.tokenized.de-en
+fairseq-preprocess --source-lang de --target-lang en \
+    --trainpref $TEXT/train --validpref $TEXT/valid --testpref $TEXT/test \
+    --destdir data-bin/iwslt14.tokenized.de-en \
+    --workers 20
+```
+* on __node__ train it
 
+```shell script
+fairseq-train \
+    data-bin/iwslt14.tokenized.de-en \
+    -s de -t en \
+    --arch transformer_iwslt_de_en --share-decoder-input-output-embed \
+    --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 5e-4 --lr-scheduler inverse_sqrt --warmup-updates 4000 \
+    --dropout 0.3 --weight-decay 0.0001 \
+    --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
+    --max-tokens 4096 \
+    --eval-bleu \
+    --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
+    --eval-bleu-detok moses \
+    --eval-bleu-remove-bpe \
+    --eval-bleu-print-samples \
+    --best-checkpoint-metric bleu --maximize-best-checkpoint-metric
+```
+
+## others
     
     # Download and prepare the data
     cd examples/translation/
