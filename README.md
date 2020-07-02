@@ -5,7 +5,7 @@
 * [europal](https://www.statmt.org/europarl/)
 
 # [fairseq-mt](https://github.com/pytorch/fairseq/tree/master/examples/translation)
-[also see](https://modelzoo.co/model/fairseq-py)
+* [models](https://modelzoo.co/model/fairseq-py)
 ## setup
 ```shell script
 conda create -n fairseq python=3.7 -y
@@ -36,7 +36,7 @@ bash prepare-iwslt14.sh
 cd ../..
 ```
 * on __node__ Preprocess/binarize the data
-```
+```shell script
 TEXT=examples/translation/iwslt14.tokenized.de-en
 fairseq-preprocess --source-lang de --target-lang en \
     --trainpref $TEXT/train --validpref $TEXT/valid --testpref $TEXT/test \
@@ -63,7 +63,56 @@ MKL_THREADING_LAYER=GNU CUDA_VISIBLE_DEVICES=0,1 fairseq-train \
     --eval-bleu-print-samples \
     --best-checkpoint-metric bleu --maximize-best-checkpoint-metric
 ```
+* evaluate
+```shell script
+fairseq-generate data-bin/iwslt14.tokenized.de-en \
+    --path checkpoints/checkpoint_best.pt \
+    --batch-size 128 --beam 5 --remove-bpe --gen-subset test
+```
 
+## WMT16
+* [scaling-nmt](https://arxiv.org/pdf/1806.00187.pdf)
+* [see](https://github.com/pytorch/fairseq/blob/master/examples/scaling_nmt/README.md)
+```shell script
+2020-07-02 16:40:54 | INFO | fairseq_cli.preprocess | [en] Dictionary: 32768 types
+2020-07-02 16:42:25 | INFO | fairseq_cli.preprocess | [en] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/train.tok.clean.bpe.32000.en: 4500966 sents, 132886171 tokens, 0.00786% replaced by <unk>
+2020-07-02 16:42:25 | INFO | fairseq_cli.preprocess | [en] Dictionary: 32768 types
+2020-07-02 16:42:26 | INFO | fairseq_cli.preprocess | [en] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/newstest2013.tok.bpe.32000.en: 3000 sents, 78126 tokens, 0.00128% replaced by <unk>
+2020-07-02 16:42:26 | INFO | fairseq_cli.preprocess | [en] Dictionary: 32768 types
+2020-07-02 16:42:26 | INFO | fairseq_cli.preprocess | [en] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/newstest2014.tok.bpe.32000.en: 3003 sents, 82800 tokens, 0.0% replaced by <unk>
+2020-07-02 16:42:26 | INFO | fairseq_cli.preprocess | [de] Dictionary: 32768 types
+2020-07-02 16:43:59 | INFO | fairseq_cli.preprocess | [de] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/train.tok.clean.bpe.32000.de: 4500966 sents, 137628246 tokens, 0.00719% replaced by <unk>
+2020-07-02 16:43:59 | INFO | fairseq_cli.preprocess | [de] Dictionary: 32768 types
+2020-07-02 16:44:00 | INFO | fairseq_cli.preprocess | [de] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/newstest2013.tok.bpe.32000.de: 3000 sents, 83913 tokens, 0.00596% replaced by <unk>
+2020-07-02 16:44:00 | INFO | fairseq_cli.preprocess | [de] Dictionary: 32768 types
+2020-07-02 16:44:01 | INFO | fairseq_cli.preprocess | [de] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/newstest2014.tok.bpe.32000.de: 3003 sents, 87313 tokens, 0.0% replaced by <unk>
+
+```
+* preprocess
+```shell script
+export TEXT=~/data/wmt16_en_de_bpe32k
+fairseq-preprocess \
+    --source-lang en --target-lang de \
+    --trainpref $TEXT/train.tok.clean.bpe.32000 \
+    --validpref $TEXT/newstest2013.tok.bpe.32000 \
+    --testpref $TEXT/newstest2014.tok.bpe.32000 \
+    --destdir data-bin/wmt16_en_de_bpe32k \
+    --nwordssrc 32768 --nwordstgt 32768 \
+    --joined-dictionary \
+    --workers 20
+```
+* train
+```shell script
+MKL_THREADING_LAYER=GNU CUDA_VISIBLE_DEVICES=0,1 fairseq-train \
+    data-bin/wmt16_en_de_bpe32k \
+    --arch transformer_vaswani_wmt_en_de_big --share-all-embeddings \
+    --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 0.0005 --lr-scheduler inverse_sqrt --warmup-updates 4000 --warmup-init-lr 1e-07 \
+    --dropout 0.3 --weight-decay 0.0 \
+    --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
+    --max-tokens 3584 \
+    --fp16
+```
 ## others
     
     # Download and prepare the data
@@ -178,3 +227,7 @@ en-pt training
 
 used standard ml-container
 pip install fairseq==0.9.0
+
+## libraries
+* [OpenNMT-py](https://github.com/OpenNMT/OpenNMT-py)
+* [masakhane-mt](https://github.com/masakhane-io/masakhane-mt)
