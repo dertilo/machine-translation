@@ -12,6 +12,7 @@ conda create -n fairseq python=3.7 -y
 conda activate fairseq
 cd fairseq && OMP_NUM_THREADS=4 pip install -e .
 pip install sacremoses
+conda install pytorch torchvision cudatoolkit=10.1 -c pytorch # if using CUDA Version: 10.1
 ```
 ## IWSLT'14 German to English [see](https://github.com/pytorch/fairseq/tree/master/examples/translation)
 ```shell script
@@ -43,9 +44,10 @@ fairseq-preprocess --source-lang de --target-lang en \
     --workers 20
 ```
 * on __node__ train it
-
+* check that GPUs are recognized: `CUDA_VISIBLE_DEVICES=0 python -c 'import torch; print(torch.cuda.device_count())'`
+* [error](https://github.com/pytorch/pytorch/issues/37377): `Error: mkl-service + Intel(R) MKL: MKL_THREADING_LAYER=INTEL is incompatible with libgomp.so.1 library` -> `MKL_THREADING_LAYER=GNU`
 ```shell script
-fairseq-train \
+MKL_THREADING_LAYER=GNU CUDA_VISIBLE_DEVICES=0,1 fairseq-train \
     data-bin/iwslt14.tokenized.de-en \
     -s de -t en \
     --arch transformer_iwslt_de_en --share-decoder-input-output-embed \
