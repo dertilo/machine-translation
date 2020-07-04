@@ -71,8 +71,17 @@ fairseq-generate data-bin/iwslt14.tokenized.de-en \
 ```
 
 ## WMT16
+### huggingface transformers
+* 
+```shell script
+wget https://s3.amazonaws.com/opennmt-trainingdata/wmt_ende_sp.tar.gz
+TEXT=wmt_ende_sp
+mkdir -p $TEXT
+tar -xzvf $TEXT.tar.gz -C $TEXT
+```
+### [fairseq](https://github.com/pytorch/fairseq/blob/master/examples/scaling_nmt/README.md)
 * [scaling-nmt](https://arxiv.org/pdf/1806.00187.pdf)
-* [see](https://github.com/pytorch/fairseq/blob/master/examples/scaling_nmt/README.md)
+
 ```shell script
 2020-07-02 16:40:54 | INFO | fairseq_cli.preprocess | [en] Dictionary: 32768 types
 2020-07-02 16:42:25 | INFO | fairseq_cli.preprocess | [en] /home/users/t/tilo-himmelsbach/data/wmt16_en_de_bpe32k/train.tok.clean.bpe.32000.en: 4500966 sents, 132886171 tokens, 0.00786% replaced by <unk>
@@ -111,7 +120,20 @@ MKL_THREADING_LAYER=GNU CUDA_VISIBLE_DEVICES=0,1 fairseq-train \
     --dropout 0.3 --weight-decay 0.0 \
     --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
     --max-tokens 3584 \
-    --fp16
+    --fp16 --tensorboard-logdir tensorboard_logdir
+```
+* evaluate
+```shell script
+fairseq-generate data-bin/wmt16_en_de_bpe32k \
+    --path checkpoints/checkpoint4.pt \
+    --beam 4 --lenpen 0.6 --remove-bpe
+...
+2020-07-04 11:03:03 | INFO | fairseq_cli.generate | Translated 3003 sentences (86379 tokens) in 76.2s (39.39 sentences/s, 1132.93 tokens/s)
+2020-07-04 11:03:03 | INFO | fairseq_cli.generate | Generate test with beam=4: BLEU4 = 1.25, 18.2/2.2/0.5/0.1 (BP=1.000, ratio=1.107, syslen=69852, reflen=63078)
+```
+* sync [results to wandb](https://app.wandb.ai/dertilo/fairseq-nmt/runs/3fm3yx2f?workspace=user-)
+```shell script
+OMP_NUM_THREADS=4 wandb sync tensorboard_logdir/
 ```
 ## others
     
@@ -231,3 +253,5 @@ pip install fairseq==0.9.0
 ## libraries
 * [OpenNMT-py](https://github.com/OpenNMT/OpenNMT-py)
 * [masakhane-mt](https://github.com/masakhane-io/masakhane-mt)
+* https://github.com/facebookresearch/UnsupervisedMT
+* [fairseq+wandb](https://github.com/Guitaricet/fairseq)
