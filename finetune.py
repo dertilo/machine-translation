@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 import time
+from abc import abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -12,7 +13,7 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
 
-from lightning_base import BaseTransformer, add_generic_args, generic_train
+from lightning_base import BaseTransformer, add_generic_args, generic_train, MODEL_MODES
 from transformers import get_linear_schedule_with_warmup
 
 
@@ -35,16 +36,12 @@ from seq2seq.callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
 logger = logging.getLogger(__name__)
 
 
-class SummarizationModule(BaseTransformer):
-    mode = "summarization"
-    loss_names = ["loss"]
-    metric_names = ROUGE_KEYS
-    val_metric = "rouge2"
+class Seq2SeqTransformer(BaseTransformer):
 
     def __init__(self, hparams, **kwargs):
         super().__init__(hparams, num_labels=None, mode=self.mode, **kwargs)
-        use_task_specific_params(self.model, "summarization")
-        save_git_info(self.hparams.output_dir)
+        # use_task_specific_params(self.model, "summarization")#TODO(tilo): what is this good for?
+        # save_git_info(self.hparams.output_dir)
         self.metrics_save_path = Path(self.output_dir) / "metrics.json"
         self.hparams_save_path = Path(self.output_dir) / "hparams.pkl"
         pickle_save(self.hparams, self.hparams_save_path)
@@ -162,8 +159,9 @@ class SummarizationModule(BaseTransformer):
         self.metrics[type_path].append(latest_metrics)
         save_json(self.metrics, self.metrics_save_path)
 
+    @abstractmethod
     def calc_generative_metrics(self, preds, target) -> Dict:
-        return calculate_rouge(preds, target)
+        raise NotImplementedError
 
     def _generative_step(self, batch: dict) -> dict:
         pad_token_id = self.tokenizer.pad_token_id
@@ -304,7 +302,17 @@ class SummarizationModule(BaseTransformer):
         return parser
 
 
-class TranslationModule(SummarizationModule):
+class SummarizationModule(Seq2SeqTransformer):
+    mode = "summarization"
+    loss_names = ["loss"]
+    metric_names = ROUGE_KEYS
+    val_metric = "rouge2"
+
+    def calc_generative_metrics(self, preds, target) -> Dict:
+        return calculate_rouge(preds, target)
+
+
+class TranslationModule(Seq2SeqTransformer):
     mode = "translation"
     loss_names = ["loss"]
     metric_names = ["bleu"]
@@ -314,7 +322,7 @@ class TranslationModule(SummarizationModule):
         return calculate_bleu_score(preds, target)
 
 
-def main(args, model=None) -> SummarizationModule:
+def main(args, model=None) -> Seq2SeqTransformer:
     Path(args.output_dir).mkdir(exist_ok=True)
     if len(os.listdir(args.output_dir)) > 3 and args.do_train:
         raise ValueError(
@@ -324,9 +332,9 @@ def main(args, model=None) -> SummarizationModule:
         )
     if model is None:
         if args.task == "summarization":
-            model: SummarizationModule = SummarizationModule(args)
+            model: Seq2SeqTransformer = Seq2SeqTransformer(args)
         else:
-            model: SummarizationModule = TranslationModule(args)
+            model: Seq2SeqTransformer = TranslationModule(args)
 
     dataset = Path(args.data_dir).name
     if (
@@ -388,7 +396,7 @@ if __name__ == "__main__":
 --sortish_sampler \
     """.strip().split()
     parser = argparse.ArgumentParser()
-    parser = SummarizationModule.add_model_specific_args(parser, os.getcwd())
+    parser = TranslationModule.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args(debug_args)
 
-    main(args)
+    main(args,model=TranslationModule(args))
