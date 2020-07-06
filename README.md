@@ -14,6 +14,56 @@ cd fairseq && OMP_NUM_THREADS=4 pip install -e .
 pip install sacremoses
 conda install pytorch torchvision cudatoolkit=10.1 -c pytorch # if using CUDA Version: 10.1
 ```
+#### wandb on compute-node socket timeout issue
+* pip install: `https://github.com/dertilo/client` which contains hacky patch
+
+## huggingface transformers
+* some en-de data #TODO(tilo): unused
+```shell script
+wget https://s3.amazonaws.com/opennmt-trainingdata/wmt_ende_sp.tar.gz
+TEXT=wmt_ende_sp
+mkdir -p $TEXT
+tar -xzvf $TEXT.tar.gz -C $TEXT
+```
+#### WMT16 English-Romanian 
+* get data
+```shell script
+wget https://s3.amazonaws.com/datasets.huggingface.co/translation/wmt_en_ro.tar.gz
+tar -xzvf wmt_en_ro.tar.gz
+cat wmt_en_ro/train.source | wc -l
+610319
+```
+* train
+```shell script
+OMP_NUM_THREADS=2 wandb init # on frontend
+
+export PYTHONPATH=~/transformers/examples
+
+CUDA_VISIBLE_DEVICES=0 WANDB_MODE=dryrun python ../transformers/examples/seq2seq/finetune.py \
+--data_dir=$HOME/data/parallel_text_corpora/wmt_en_ro \
+--model_name_or_path=Helsinki-NLP/opus-mt-en-ro \
+--learning_rate=3e-5 \
+--train_batch_size=32 \
+--eval_batch_size=32 \
+--output_dir=en-ro-helsinki \
+--num_train_epochs 10 \
+--fp16 \
+--gpus 1 \
+--do_train \
+--do_predict \
+--n_val 1000 \
+--val_check_interval 0.1 \
+--sortish_sampler \
+--logger wandb \
+--wandb_project machine-translation
+```
+* evaluate
+```shell script
+python ../transformers/examples/seq2seq/run_eval.py ~/data/parallel_text_corpora/wmt_en_ro/test.source output.txt Helsinki-NLP/opus-mt-en-ro --reference_path ~/data/parallel_text_corpora/wmt_en_ro/test.target --score_path scores.json --metric bleu --bs 32 --fp16
+cat scores.json
+{"bleu": 27.651824005955024}
+```
+
 ## IWSLT'14 German to English [see](https://github.com/pytorch/fairseq/tree/master/examples/translation)
 ```shell script
 [de] Dictionary: 7432 types
@@ -71,14 +121,7 @@ fairseq-generate data-bin/iwslt14.tokenized.de-en \
 ```
 
 ## WMT16
-### huggingface transformers
-* 
-```shell script
-wget https://s3.amazonaws.com/opennmt-trainingdata/wmt_ende_sp.tar.gz
-TEXT=wmt_ende_sp
-mkdir -p $TEXT
-tar -xzvf $TEXT.tar.gz -C $TEXT
-```
+
 ### [fairseq](https://github.com/pytorch/fairseq/blob/master/examples/scaling_nmt/README.md)
 * [scaling-nmt](https://arxiv.org/pdf/1806.00187.pdf)
 
