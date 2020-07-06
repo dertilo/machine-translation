@@ -16,38 +16,21 @@ from lightning_base import BaseTransformer, add_generic_args, generic_train
 from transformers import get_linear_schedule_with_warmup
 
 
-try:
-    from .utils import (
-        use_task_specific_params,
-        SummarizationDataset,
-        lmap,
-        flatten_list,
-        pickle_save,
-        save_git_info,
-        save_json,
-        freeze_params,
-        calculate_rouge,
-        get_git_info,
-        ROUGE_KEYS,
-        calculate_bleu_score,
-    )
-    from .callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
-except ImportError:
-    from utils import (
-        use_task_specific_params,
-        SummarizationDataset,
-        lmap,
-        flatten_list,
-        pickle_save,
-        save_git_info,
-        save_json,
-        freeze_params,
-        calculate_rouge,
-        get_git_info,
-        ROUGE_KEYS,
-        calculate_bleu_score,
-    )
-    from callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
+from seq2seq.utils import (
+    use_task_specific_params,
+    SummarizationDataset,
+    lmap,
+    flatten_list,
+    pickle_save,
+    save_git_info,
+    save_json,
+    freeze_params,
+    calculate_rouge,
+    get_git_info,
+    ROUGE_KEYS,
+    calculate_bleu_score,
+)
+from seq2seq.callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +250,7 @@ class SummarizationModule(BaseTransformer):
         parser.add_argument("--freeze_embeds", action="store_true")
         parser.add_argument("--sortish_sampler", action="store_true", default=False)
         parser.add_argument("--logger", type=str, choices=["default", "wandb", "wandb_shared"], default="default")
+        # parser.add_argument("--wandb_project", type=str, default="default")
         parser.add_argument("--n_train", type=int, default=-1, required=False, help="# examples. -1 means use all.")
         parser.add_argument("--n_val", type=int, default=500, required=False, help="# examples. -1 means use all.")
         parser.add_argument("--n_test", type=int, default=-1, required=False, help="# examples. -1 means use all.")
@@ -306,8 +290,7 @@ def main(args, model=None) -> SummarizationModule:
         logger = True  # don't pollute wandb logs unnecessarily
     elif args.logger == "wandb":
         from pytorch_lightning.loggers import WandbLogger
-
-        logger = WandbLogger(name=model.output_dir.name, project=dataset)
+        logger = WandbLogger(name=model.output_dir.name, project=args.wandb_project)
 
     elif args.logger == "wandb_shared":
         from pytorch_lightning.loggers import WandbLogger
@@ -336,8 +319,23 @@ def main(args, model=None) -> SummarizationModule:
 
 
 if __name__ == "__main__":
+    debug_args = """
+--data_dir=some_data \
+--model_name_or_path=sshleifer/tiny-mbart \
+--learning_rate=3e-5 \
+--train_batch_size=32 \
+--eval_batch_size=32 \
+--output_dir=debug \
+--num_train_epochs 10 \
+--gpus 0 \
+--do_train \
+--do_predict \
+--n_val 1000 \
+--val_check_interval 0.1 \
+--sortish_sampler \
+    """.strip().split(" ")
     parser = argparse.ArgumentParser()
     parser = SummarizationModule.add_model_specific_args(parser, os.getcwd())
-    args = parser.parse_args()
+    args = parser.parse_args(debug_args)
 
     main(args)
