@@ -31,7 +31,13 @@ from seq2seq.utils import (
 )
 from seq2seq.callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
 
-from common import get_n_obs, get_target_lens, get_dataset_kwargs, build_dataloader
+from common import (
+    get_n_obs,
+    get_target_lens,
+    get_dataset_kwargs,
+    build_dataloader,
+    calc_loss,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,21 +87,8 @@ class Seq2SeqTransformer(BaseTransformer):
 
     def _step(self, batch: dict) -> Tuple:
         pad_token_id = self.tokenizer.pad_token_id
-        source_ids, source_mask, y = (
-            batch["input_ids"],
-            batch["attention_mask"],
-            batch["decoder_input_ids"],
-        )
-        y_ids = y[:, :-1].contiguous()
-        lm_labels = y[:, 1:].clone()
-        lm_labels[y[:, 1:] == pad_token_id] = -100
-        outputs = self(
-            source_ids,
-            attention_mask=source_mask,
-            decoder_input_ids=y_ids,
-            labels=lm_labels,
-        )
-        loss = outputs[0]
+        model = self.model
+        loss = calc_loss(batch, model, pad_token_id)
         return (loss,)
 
     def training_step(self, batch, batch_idx) -> Dict:
