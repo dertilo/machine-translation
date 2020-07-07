@@ -13,17 +13,15 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
 
-from lightning_base import BaseTransformer, add_generic_args, generic_train, MODEL_MODES
+from lightning_base import BaseTransformer, add_generic_args, generic_train
 from transformers import get_linear_schedule_with_warmup
 
 
 from seq2seq.utils import (
-    use_task_specific_params,
     SummarizationDataset,
     lmap,
     flatten_list,
     pickle_save,
-    save_git_info,
     save_json,
     freeze_params,
     calculate_rouge,
@@ -33,11 +31,12 @@ from seq2seq.utils import (
 )
 from seq2seq.callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
 
+from common import get_n_obs, get_target_lens, get_dataset_kwargs, build_dataloader
+
 logger = logging.getLogger(__name__)
 
 
 class Seq2SeqTransformer(BaseTransformer):
-
     def __init__(self, hparams, **kwargs):
         super().__init__(hparams, num_labels=None, mode=self.mode, **kwargs)
         # use_task_specific_params(self.model, "summarization")#TODO(tilo): what is this good for?
@@ -48,31 +47,9 @@ class Seq2SeqTransformer(BaseTransformer):
         self.step_count = 0
         self.metrics = defaultdict(list)
 
-        self.dataset_kwargs: dict = dict(
-            data_dir=self.hparams.data_dir,
-            max_source_length=self.hparams.max_source_length,
-            prefix=self.model.config.prefix or "",
-        )
-        n_observations_per_split = {
-            "train": self.hparams.n_train,
-            "val": self.hparams.n_val,
-            "test": self.hparams.n_test,
-        }
-        self.n_obs = {
-            k: v if v >= 0 else None for k, v in n_observations_per_split.items()
-        }
-
-        self.target_lens = {
-            "train": self.hparams.max_target_length,
-            "val": self.hparams.val_max_target_length,
-            "test": self.hparams.test_max_target_length,
-        }
-        assert (
-            self.target_lens["train"] <= self.target_lens["val"]
-        ), f"target_lens: {self.target_lens}"
-        assert (
-            self.target_lens["train"] <= self.target_lens["test"]
-        ), f"target_lens: {self.target_lens}"
+        self.dataset_kwargs: dict = get_dataset_kwargs(self.hparams, self.model)
+        self.n_obs = get_n_obs(self.hparams)
+        self.target_lens = get_target_lens(self.hparams)
 
         if self.hparams.freeze_embeds:
             self.freeze_embeds()
@@ -190,41 +167,9 @@ class Seq2SeqTransformer(BaseTransformer):
     def test_epoch_end(self, outputs):
         return self.validation_epoch_end(outputs, prefix="test")
 
-    def get_dataset(self, type_path) -> SummarizationDataset:
-        n_obs = self.n_obs[type_path]
-        max_target_length = self.target_lens[type_path]
-        dataset = SummarizationDataset(
-            self.tokenizer,
-            type_path=type_path,
-            n_obs=n_obs,
-            max_target_length=max_target_length,
-            **self.dataset_kwargs,
-        )
-        return dataset
-
-    def get_dataloader(
-        self, type_path: str, batch_size: int, shuffle: bool = False
-    ) -> DataLoader:
-        dataset = self.get_dataset(type_path)
-        sampler = None
-        if self.hparams.sortish_sampler and type_path == "train":
-            assert self.hparams.gpus <= 1  # TODO: assert earlier
-            sampler = dataset.make_sortish_sampler(batch_size)
-            shuffle = False
-
-        dataloader = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            collate_fn=dataset.collate_fn,
-            shuffle=shuffle,
-            num_workers=self.num_workers,
-            sampler=sampler,
-        )
-        return dataloader
-
     def train_dataloader(self) -> DataLoader:
-        dataloader = self.get_dataloader(
-            "train", batch_size=self.hparams.train_batch_size, shuffle=True
+        dataloader = build_dataloader(
+            self.hparams, self.tokenizer, self.model, "train", shuffle=True
         )
         t_total = (
             (
@@ -243,10 +188,10 @@ class Seq2SeqTransformer(BaseTransformer):
         return dataloader
 
     def val_dataloader(self) -> DataLoader:
-        return self.get_dataloader("val", batch_size=self.hparams.eval_batch_size)
+        return build_dataloader(self.hparams, self.tokenizer, self.model, "val")
 
     def test_dataloader(self) -> DataLoader:
-        return self.get_dataloader("test", batch_size=self.hparams.eval_batch_size)
+        return build_dataloader(self.hparams, self.tokenizer, self.model, "test")
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
@@ -399,4 +344,4 @@ if __name__ == "__main__":
     parser = TranslationModule.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args(debug_args)
 
-    main(args,model=TranslationModule(args))
+    main(args, model=TranslationModule(args))
