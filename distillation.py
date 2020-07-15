@@ -13,33 +13,21 @@ from lightning_base import generic_train
 from transformers import AdamW, BartConfig, BartForConditionalGeneration, T5Config, T5ForConditionalGeneration
 
 # based on: https://github.com/huggingface/transformers/blob/master/examples/seq2seq/distillation.py
-try:
-    from .finetune import SummarizationModule
-    from .initialization_utils import init_student, copy_layers
-    from .utils import (
-        use_task_specific_params,
-        SummarizationDataset,
-        pickle_load,
-        freeze_params,
-        assert_all_frozen,
-        any_requires_grad,
-    )
-    from .finetune import main as ft_main
-except ImportError:
-    from finetune import SummarizationModule
-    from finetune import main as ft_main
-    from initialization_utils import init_student, copy_layers
-    from utils import (
-        use_task_specific_params,
-        SummarizationDataset,
-        pickle_load,
-        freeze_params,
-        assert_all_frozen,
-        any_requires_grad,
-    )
+
+from finetune import SummarizationModule, Seq2SeqTransformer
+from finetune import main as ft_main
+from seq2seq.initialization_utils import init_student, copy_layers
+from seq2seq.utils import (
+    use_task_specific_params,
+    SummarizationDataset,
+    pickle_load,
+    freeze_params,
+    assert_all_frozen,
+    any_requires_grad,
+)
 
 
-class BartSummarizationDistiller(SummarizationModule):
+class BartSummarizationDistiller(Seq2SeqTransformer):
     loss_names = ["loss", "ce_loss", "mlm_loss", "enc_mse_loss", "hid_loss_enc", "hid_loss_dec"]
 
     def __init__(self, hparams):
@@ -445,8 +433,25 @@ def distill_main(args):
 
 
 if __name__ == "__main__":
+    debug_args = """
+--data_dir=some_data \
+--src_lang=en_XX \
+--tgt_lang=ro_RO \
+--model_name_or_path=sshleifer/tiny-mbart \
+--learning_rate=3e-5 \
+--train_batch_size=32 \
+--eval_batch_size=32 \
+--output_dir=debug \
+--num_train_epochs 10 \
+--gpus 0 \
+--do_train \
+--do_predict \
+--n_val 1000 \
+--val_check_interval 0.1 \
+--sortish_sampler \
+    """.strip().split()
     parser = argparse.ArgumentParser()
     parser = BartSummarizationDistiller.add_model_specific_args(parser, os.getcwd())
-    args = parser.parse_args()
+    args = parser.parse_args(debug_args)
 
     distill_main(args)
