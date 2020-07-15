@@ -14,7 +14,7 @@ from transformers import AdamW, BartConfig, BartForConditionalGeneration, T5Conf
 
 # based on: https://github.com/huggingface/transformers/blob/master/examples/seq2seq/distillation.py
 
-from finetune import SummarizationModule, Seq2SeqTransformer
+from finetune import TranslationModule
 from finetune import main as ft_main
 from seq2seq.initialization_utils import init_student, copy_layers
 from seq2seq.utils import (
@@ -27,7 +27,7 @@ from seq2seq.utils import (
 )
 
 
-class BartSummarizationDistiller(Seq2SeqTransformer):
+class BartTranslationDistiller(TranslationModule):
     loss_names = ["loss", "ce_loss", "mlm_loss", "enc_mse_loss", "hid_loss_enc", "hid_loss_dec"]
 
     def __init__(self, hparams):
@@ -164,7 +164,8 @@ class BartSummarizationDistiller(Seq2SeqTransformer):
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
-        SummarizationModule.add_model_specific_args(parser, root_dir)
+        TranslationModule.add_model_specific_args(parser, root_dir)
+        # fmt: off
         parser.add_argument("--teacher", default="facebook/bart-large-cnn", type=str)
         parser.add_argument("--alpha_ce", default=0.8, type=float)
         parser.add_argument("--alpha_mlm", default=0.2, type=float)
@@ -175,7 +176,7 @@ class BartSummarizationDistiller(Seq2SeqTransformer):
         parser.add_argument("--student_encoder_layers", default=12, type=int, required=False)
         parser.add_argument("--no_teacher", action="store_true", default=False)
         parser.add_argument("--length_penalty", type=float, default=-1)
-
+        # fmt: on
         return parser
 
     def _step(self, batch):
@@ -253,131 +254,12 @@ class BartSummarizationDistiller(Seq2SeqTransformer):
         return sum(hidden_losses)
 
 
-class T5SummarizationDistiller(BartSummarizationDistiller):
-    def pre_init(self, hparams):
-        raise NotImplementedError("T5 Distillation does not work yet")
-        self.output_dir = Path(hparams.output_dir)
-        self.output_dir.mkdir(exist_ok=True)
-        teacher = T5ForConditionalGeneration.from_pretrained(hparams.teacher)
-        n_layer = hparams.student_decoder_layers
-        assert n_layer == hparams.student_encoder_layers  # TODO(SS): relax this constraint so that we can do 12-6.
-        d_layers_to_copy = get_layers_to_copy(n_layer, len(teacher.decoder.block))
-        e_layers_to_copy: List = get_layers_to_copy(n_layer, len(teacher.encoder.block))
-        student_updates = {"num_layers": n_layer}
-        hparams.d_layer_to_copy = d_layers_to_copy
-        hparams.e_layer_to_copy = e_layers_to_copy
-        kw = teacher.config.to_diff_dict()
-
-        kw.update(student_updates)
-        # Copy weights
-        student_cfg = T5Config(**kw)
-        student = T5ForConditionalGeneration(student_cfg)
-        student, _ = init_student(student, teacher)
-        self.copy_to_student(d_layers_to_copy, e_layers_to_copy, hparams, student, teacher)
-        Path(hparams.output_dir).mkdir(exist_ok=True)
-        task_specific_params = student.config.task_specific_params
-        if task_specific_params is not None:
-            student.config.update(task_specific_params.get("summarization", {}))  # TODO: dont hardcode
-        save_dir = self.output_dir.joinpath("student")
-        save_dir.mkdir(exist_ok=True)
-
-        student.save_pretrained(save_dir)
-        hparams.model_name_or_path = str(save_dir)
-        return student, student_cfg, teacher
-
-    def freeze_embeds(self):
-        freeze_params(self.model.shared)
-        for d in [self.model.encoder, self.model.decoder]:
-            freeze_params(d.embed_tokens)
-
-    def sanity_check_gradients(self):
-        """T5"""
-        assert_all_frozen(self.teacher)
-        assert_all_frozen(self.model.decoder.embed_tokens)
-        assert_all_frozen(self.model.encoder.embed_tokens)
-        if self.different_encoder:
-            assert any_requires_grad(self.model.encoder)
-        else:
-            freeze_params(self.model.encoder)
-            del self.teacher.model.encoder
-        if self.different_decoder:
-            assert any_requires_grad(self.model.decoder)
-        else:
-            freeze_params(self.model.decoder)  # TODO(SS): very suspicious
-
-    def _step(self, batch):
-        pad_token_id = self.tokenizer.pad_token_id
-        source_ids, source_mask, y = batch["input_ids"], batch["attention_mask"], batch["decoder_input_ids"]
-        decoder_input_ids = y[:, :-1].contiguous()
-        labels = y[:, 1:].clone()
-        labels[y[:, 1:] == pad_token_id] = -100
-        # noinspection PyCallingNonCallable
-        dec_mask = decoder_input_ids.ne(pad_token_id)
-
-        sloss, slogits, dec_hidden, enc_outputs, enc_hidden_state = self(
-            source_ids,
-            attention_mask=source_mask,
-            decoder_input_ids=decoder_input_ids,
-            labels=labels,
-            output_hidden_states=True,
-            output_attentions=False,
-            use_cache=False,
-        )
-
-        def zero_tensor():
-            return torch.tensor(0.0).type_as(sloss)
-
-        loss_encoder, hid_loss_enc, hid_loss_dec = zero_tensor(), zero_tensor(), zero_tensor()
-        if self.different_encoder:
-            with torch.no_grad():
-                teacher_enc_outputs, teacher_enc_hid = self.teacher.encoder(
-                    source_ids, attention_mask=source_mask, output_hidden_states=True, use_cache=False,
-                )
-            if self.hparams.alpha_encoder_loss > 0:
-                loss_encoder = self.calc_mse_loss(enc_outputs, teacher_enc_outputs, source_mask)
-
-            hid_loss_enc = self.calc_hidden_loss(
-                source_mask, enc_hidden_state, teacher_enc_hid, self.hparams.e_layer_to_copy
-            )
-
-        teacher_enc_outputs = (enc_outputs,)
-        assert isinstance(teacher_enc_outputs, tuple), type(teacher_enc_outputs)
-
-        with torch.no_grad():
-            tloss, tlogits, tdec_hidden, _ = self.teacher(
-                source_ids,
-                attention_mask=source_mask,
-                encoder_outputs=teacher_enc_outputs,
-                decoder_input_ids=decoder_input_ids,
-                lm_labels=labels,
-                output_hidden_states=True,
-                use_cache=False,
-            )
-
-        loss_ce, s_logits_slct, t_logits_slct = self.calc_ce_loss(dec_mask, slogits, tlogits)
-        if self.alpha_hid > 0:
-            hid_loss_dec = self.calc_hidden_loss(dec_mask, dec_hidden, tdec_hidden, self.hparams.d_layer_to_copy)
-
-        blended_loss = (
-            self.alpha_ce * loss_ce
-            + self.alpha_mlm * sloss
-            + self.hparams.alpha_encoder_loss * loss_encoder
-            + self.hparams.alpha_hid * (hid_loss_enc + hid_loss_dec)
-        )
-        return blended_loss, loss_ce, sloss, loss_encoder, hid_loss_enc, hid_loss_dec
-
-
 def create_module(args):
-    t5 = "t5" in args.model_name_or_path
     if args.no_teacher:
         assert not args.enc_only
-        module_cls = SummarizationModule
-    elif t5:
-        module_cls = T5SummarizationDistiller
-    elif args.enc_only:
-        raise ValueError("Deleted that")
+        module_cls = TranslationModule
     else:
-        module_cls = BartSummarizationDistiller
+        module_cls = BartTranslationDistiller
     args.setup_cls: str = module_cls.__name__
     model = module_cls(args)
     return model
@@ -437,10 +319,18 @@ if __name__ == "__main__":
 --data_dir=some_data \
 --src_lang=en_XX \
 --tgt_lang=ro_RO \
---model_name_or_path=sshleifer/tiny-mbart \
---learning_rate=3e-5 \
+--model_name_or_path IGNORED \
+--learning_rate=3e-4 \
 --train_batch_size=32 \
 --eval_batch_size=32 \
+--teacher sshleifer/tiny-mbart \
+--tokenizer_name sshleifer/tiny-mbart \
+--warmup_steps 500 \
+--student_decoder_layers 6 --student_encoder_layers 12 \
+--freeze_encoder --freeze_embeds \
+--alpha_hid=3. --length_penalty=0.5 \
+--gradient_accumulation_steps=2
+--max_target_length=60 --val_max_target_length=60 --test_max_target_length=100 \
 --output_dir=debug \
 --num_train_epochs 10 \
 --gpus 0 \
@@ -450,8 +340,9 @@ if __name__ == "__main__":
 --val_check_interval 0.1 \
 --sortish_sampler \
     """.strip().split()
+    # --fp16 \
     parser = argparse.ArgumentParser()
-    parser = BartSummarizationDistiller.add_model_specific_args(parser, os.getcwd())
+    parser = BartTranslationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args(debug_args)
 
     distill_main(args)
