@@ -258,9 +258,6 @@ class Seq2SeqTransformer(BaseTransformer):
         parser.add_argument("--n_train", type=int, default=-1, required=False, help="# examples. -1 means use all.")
         parser.add_argument("--n_val", type=int, default=500, required=False, help="# examples. -1 means use all.")
         parser.add_argument("--n_test", type=int, default=-1, required=False, help="# examples. -1 means use all.")
-        parser.add_argument(
-            "--task", type=str, default="summarization", required=False, help="# examples. -1 means use all."
-        )
         # fmt: on
         return parser
 
@@ -349,11 +346,6 @@ def main(args, model=None) -> Seq2SeqTransformer:
                 args.output_dir
             )
         )
-    if model is None:
-        if args.task == "summarization":
-            model: Seq2SeqTransformer = Seq2SeqTransformer(args)
-        else:
-            model: Seq2SeqTransformer = TranslationModule(args)
 
     dataset = Path(args.data_dir).name
     if (

@@ -409,7 +409,7 @@ if __name__ == "__main__":
 --teacher sshleifer/tiny-mbart \
 --tokenizer_name sshleifer/tiny-mbart \
 --warmup_steps 500 \
---student_decoder_layers 6 --student_encoder_layers 12 \
+--student_decoder_layers 2 --student_encoder_layers 2 \
 --freeze_encoder --freeze_embeds \
 --alpha_hid=3. --length_penalty=0.5 \
 --gradient_accumulation_steps=2
