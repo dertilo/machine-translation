@@ -37,6 +37,7 @@ from common import (
     build_dataloader,
     calc_loss,
     DataSetType,
+    trim_seq2seq_batch,
 )
 from datasets import Seq2SeqDataset
 
@@ -136,9 +137,7 @@ class Seq2SeqTransformer(BaseTransformer):
 
     def _generative_step(self, batch: dict) -> dict:
         pad_token_id = self.tokenizer.pad_token_id
-        source_ids, source_mask, y = SummarizationDataset.trim_seq2seq_batch(
-            batch, pad_token_id
-        )
+        source_ids, source_mask, y = trim_seq2seq_batch(batch, pad_token_id)
         t0 = time.time()
         generated_ids = self.model.generate(
             input_ids=source_ids, attention_mask=source_mask, use_cache=True,

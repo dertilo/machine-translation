@@ -69,14 +69,6 @@ class Seq2SeqDataset(Dataset):
             "decoder_input_ids": target_ids,
         }
 
-    @staticmethod
-    def trim_seq2seq_batch(batch, pad_token_id):
-        y = trim_batch(batch["decoder_input_ids"], pad_token_id)
-        source_ids, source_mask = trim_batch(
-            batch["input_ids"], pad_token_id, attention_mask=batch["attention_mask"]
-        )
-        return source_ids, source_mask, y
-
     @property
     def src_lens(self):  # Can delete?
         return lmap(len, self.source)

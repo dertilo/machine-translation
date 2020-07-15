@@ -53,6 +53,14 @@ def calc_loss(batch, model, pad_token_id):
     return loss
 
 
+def trim_seq2seq_batch(batch, pad_token_id):
+    y = trim_batch(batch["decoder_input_ids"], pad_token_id)
+    source_ids, source_mask = trim_batch(
+        batch["input_ids"], pad_token_id, attention_mask=batch["attention_mask"]
+    )
+    return source_ids, source_mask, y
+
+
 def collate_fn(batch, pad_token_id) -> dict:
     input_ids = torch.stack([x["input_ids"] for x in batch])
     masks = torch.stack([x["attention_mask"] for x in batch])
