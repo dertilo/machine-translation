@@ -10,7 +10,13 @@ from torch import nn
 from torch.nn import functional as F
 
 from lightning_base import generic_train
-from transformers import AdamW, BartConfig, BartForConditionalGeneration, T5Config, T5ForConditionalGeneration
+from transformers import (
+    AdamW,
+    BartConfig,
+    BartForConditionalGeneration,
+    T5Config,
+    T5ForConditionalGeneration,
+)
 
 # based on: https://github.com/huggingface/transformers/blob/master/examples/seq2seq/distillation.py
 
@@ -28,7 +34,14 @@ from seq2seq.utils import (
 
 
 class BartTranslationDistiller(TranslationModule):
-    loss_names = ["loss", "ce_loss", "mlm_loss", "enc_mse_loss", "hid_loss_enc", "hid_loss_dec"]
+    loss_names = [
+        "loss",
+        "ce_loss",
+        "mlm_loss",
+        "enc_mse_loss",
+        "hid_loss_enc",
+        "hid_loss_dec",
+    ]
 
     def __init__(self, hparams):
         assert Path(hparams.data_dir).exists()
@@ -69,8 +82,12 @@ class BartTranslationDistiller(TranslationModule):
         }
         if hparams.length_penalty != -1:
             student_updates["length_penalty"] = hparams.length_penalty
-        d_layers_to_copy = get_layers_to_copy(student_updates["decoder_layers"], teacher.config.decoder_layers)
-        e_layers_to_copy: List = get_layers_to_copy(student_updates["encoder_layers"], teacher.config.encoder_layers)
+        d_layers_to_copy = get_layers_to_copy(
+            student_updates["decoder_layers"], teacher.config.decoder_layers
+        )
+        e_layers_to_copy: List = get_layers_to_copy(
+            student_updates["encoder_layers"], teacher.config.encoder_layers
+        )
         hparams.d_layer_to_copy = d_layers_to_copy
         hparams.e_layer_to_copy = e_layers_to_copy
         kw = teacher.config.to_diff_dict()
@@ -80,24 +97,44 @@ class BartTranslationDistiller(TranslationModule):
         student = BartForConditionalGeneration(student_cfg)
         student, _ = init_student(student, teacher)
         save_dir = self.output_dir.joinpath("student")
-        self.copy_to_student(d_layers_to_copy, e_layers_to_copy, hparams, student, teacher)
+        self.copy_to_student(
+            d_layers_to_copy, e_layers_to_copy, hparams, student, teacher
+        )
         student.save_pretrained(save_dir)
         hparams.model_name_or_path = str(save_dir)
         return student, student_cfg, teacher
 
-    def copy_to_student(self, d_layers_to_copy, e_layers_to_copy, hparams, student, teacher):
+    def copy_to_student(
+        self, d_layers_to_copy, e_layers_to_copy, hparams, student, teacher
+    ):
         if teacher.config.model_type == "t5":
-            return self.copy_t5_to_student(d_layers_to_copy, e_layers_to_copy, hparams, student, teacher)
+            return self.copy_t5_to_student(
+                d_layers_to_copy, e_layers_to_copy, hparams, student, teacher
+            )
         self.different_encoder: bool = hparams.student_encoder_layers != teacher.config.encoder_layers
-        self.different_decoder = hparams.student_decoder_layers != teacher.config.decoder_layers
+        self.different_decoder = (
+            hparams.student_decoder_layers != teacher.config.decoder_layers
+        )
         if self.different_decoder:
-            copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
+            copy_layers(
+                teacher.model.decoder.layers,
+                student.model.decoder.layers,
+                d_layers_to_copy,
+            )
         if self.different_encoder:
-            copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
+            copy_layers(
+                teacher.model.encoder.layers,
+                student.model.encoder.layers,
+                e_layers_to_copy,
+            )
 
-    def copy_t5_to_student(self, d_layers_to_copy, e_layers_to_copy, hparams, student, teacher):
+    def copy_t5_to_student(
+        self, d_layers_to_copy, e_layers_to_copy, hparams, student, teacher
+    ):
         self.different_encoder: bool = hparams.student_encoder_layers != teacher.config.num_layers
-        self.different_decoder = hparams.student_decoder_layers != teacher.config.num_layers
+        self.different_decoder = (
+            hparams.student_decoder_layers != teacher.config.num_layers
+        )
         if self.different_decoder:
             copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
         if self.different_encoder:
@@ -105,10 +142,14 @@ class BartTranslationDistiller(TranslationModule):
 
     def get_dataset(self, type_path) -> SummarizationDataset:
         n_obs = self.n_obs[type_path]
-        dataset = SummarizationDataset(self.tokenizer, type_path=type_path, n_obs=n_obs, **self.dataset_kwargs)
+        dataset = SummarizationDataset(
+            self.tokenizer, type_path=type_path, n_obs=n_obs, **self.dataset_kwargs
+        )
         return dataset
 
-    def calc_mse_loss(self, teacher_outputs: torch.Tensor, student_outputs: torch.Tensor, mask) -> torch.FloatTensor:
+    def calc_mse_loss(
+        self, teacher_outputs: torch.Tensor, student_outputs: torch.Tensor, mask
+    ) -> torch.FloatTensor:
         if mask is not None:
             # mask has False at padding_idx
             sel_mask = mask[:, :, None].expand_as(student_outputs).bool()
@@ -131,9 +172,15 @@ class BartTranslationDistiller(TranslationModule):
             )  # (bs * seq_length * voc_size) modulo the 1s in mask
         else:
             t_logits_slct = t_logits
-            s_logits_slct = s_logits  # (bs * seq_length * voc_size) modulo the 1s in mask
-        s_logits_slct = s_logits_slct.view(-1, s_logits.size(-1))  # (bs * seq_length, voc_size) modulo the 1s in mask
-        t_logits_slct = t_logits_slct.view(-1, s_logits.size(-1))  # (bs * seq_length, voc_size) modulo the 1s in mask
+            s_logits_slct = (
+                s_logits  # (bs * seq_length * voc_size) modulo the 1s in mask
+            )
+        s_logits_slct = s_logits_slct.view(
+            -1, s_logits.size(-1)
+        )  # (bs * seq_length, voc_size) modulo the 1s in mask
+        t_logits_slct = t_logits_slct.view(
+            -1, s_logits.size(-1)
+        )  # (bs * seq_length, voc_size) modulo the 1s in mask
         assert t_logits_slct.size() == s_logits_slct.size()
         loss_ce = (
             self.ce_loss_fct(
@@ -150,15 +197,27 @@ class BartTranslationDistiller(TranslationModule):
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [
+                    p
+                    for n, p in model.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
                 "weight_decay": self.hparams.weight_decay,
             },
             {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [
+                    p
+                    for n, p in model.named_parameters()
+                    if any(nd in n for nd in no_decay)
+                ],
                 "weight_decay": 0.0,
             },
         ]
-        optimizer = AdamW(optimizer_grouped_parameters, lr=self.hparams.learning_rate, eps=self.hparams.adam_epsilon)
+        optimizer = AdamW(
+            optimizer_grouped_parameters,
+            lr=self.hparams.learning_rate,
+            eps=self.hparams.adam_epsilon,
+        )
         self.opt = optimizer
         return [optimizer]
 
@@ -182,7 +241,11 @@ class BartTranslationDistiller(TranslationModule):
     def _step(self, batch):
         # assert is_frozen(self.teacher)
         pad_token_id = self.tokenizer.pad_token_id
-        input_ids, src_mask, y = batch["input_ids"], batch["attention_mask"], batch["decoder_input_ids"]
+        input_ids, src_mask, y = (
+            batch["input_ids"],
+            batch["attention_mask"],
+            batch["decoder_input_ids"],
+        )
         decoder_input_ids = y[:, :-1].contiguous()
         labels = y[:, 1:].clone()
         labels[y[:, 1:] == pad_token_id] = -100
@@ -199,17 +262,26 @@ class BartTranslationDistiller(TranslationModule):
         def zero_tensor():
             return torch.tensor(0.0).type_as(sloss)
 
-        loss_encoder, hid_loss_enc, hid_loss_dec = zero_tensor(), zero_tensor(), zero_tensor()
+        loss_encoder, hid_loss_enc, hid_loss_dec = (
+            zero_tensor(),
+            zero_tensor(),
+            zero_tensor(),
+        )
         if self.different_encoder:
             with torch.no_grad():
                 teacher_enc_outputs, teacher_enc_hid, _ = self.teacher.model.encoder(
                     input_ids, attention_mask=src_mask, output_hidden_states=True
                 )
             if self.hparams.alpha_encoder_loss > 0:
-                loss_encoder = self.calc_mse_loss(enc_outputs, teacher_enc_outputs, src_mask)
+                loss_encoder = self.calc_mse_loss(
+                    enc_outputs, teacher_enc_outputs, src_mask
+                )
 
             hid_loss_enc = self.calc_hidden_loss(
-                src_mask, enc_hidden_state, teacher_enc_hid, self.hparams.e_layer_to_copy
+                src_mask,
+                enc_hidden_state,
+                teacher_enc_hid,
+                self.hparams.e_layer_to_copy,
             )
 
         teacher_enc_outputs = (enc_outputs,)
@@ -225,9 +297,13 @@ class BartTranslationDistiller(TranslationModule):
                 output_hidden_states=True,
             )
         dec_mask = decoder_input_ids.ne(pad_token_id)
-        loss_ce, s_logits_slct, t_logits_slct = self.calc_ce_loss(dec_mask, slogits, tlogits)
+        loss_ce, s_logits_slct, t_logits_slct = self.calc_ce_loss(
+            dec_mask, slogits, tlogits
+        )
         if self.alpha_hid > 0:
-            hid_loss_dec = self.calc_hidden_loss(dec_mask, dec_hidden, tdec_hidden, self.hparams.d_layer_to_copy)
+            hid_loss_dec = self.calc_hidden_loss(
+                dec_mask, dec_hidden, tdec_hidden, self.hparams.d_layer_to_copy
+            )
 
         blended_loss = (
             self.alpha_ce * loss_ce
@@ -247,7 +323,10 @@ class BartTranslationDistiller(TranslationModule):
         mask = attention_mask.to(hidden_states[0])
         valid_count = mask.sum() * hidden_states[0].size(-1)
         hidden_losses = [
-            (F.mse_loss(hidden_states[i], hidden_states_T[j], reduction="none") * mask.unsqueeze(-1)).sum()
+            (
+                F.mse_loss(hidden_states[i], hidden_states_T[j], reduction="none")
+                * mask.unsqueeze(-1)
+            ).sum()
             / valid_count
             for i, j in enumerate(matches)
         ]
@@ -308,7 +387,11 @@ def get_layers_to_copy(n_to_get, tot):
 def distill_main(args):
     Path(args.output_dir).mkdir(exist_ok=True)
     if len(os.listdir(args.output_dir)) > 3 and args.do_train:
-        raise ValueError("Output directory ({}) already exists and is not empty.".format(args.output_dir))
+        raise ValueError(
+            "Output directory ({}) already exists and is not empty.".format(
+                args.output_dir
+            )
+        )
 
     model = create_module(args)
     return ft_main(args, model=model)
