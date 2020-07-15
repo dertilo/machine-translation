@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import Dataset
 
 
-class SummarizationDataset(Dataset):
+class Seq2SeqDataset(Dataset):
     def __init__(
         self,
         tokenizer,
@@ -26,6 +26,7 @@ class SummarizationDataset(Dataset):
         tgt_lang=None,
     ):
         super().__init__()
+        self.type_path = type_path
         # FIXME: the rstrip logic strips all the chars, it seems.
         tok_name = tokenizer.__class__.__name__.lower().rstrip("tokenizer")
         if hasattr(tokenizer, "set_lang") and src_lang is not None:

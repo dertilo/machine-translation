@@ -36,6 +36,7 @@ from common import (
     calc_loss,
     DataSetType,
 )
+from datasets import Seq2SeqDataset
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +294,7 @@ class TranslationModule(Seq2SeqTransformer):
         type_path = dataset_type.name
         max_target_length = target_lens[type_path]
 
-        dataset = SummarizationDataset(
+        dataset = Seq2SeqDataset(
             self.tokenizer,
             type_path=type_path,
             n_obs=n_obs[type_path],
@@ -301,6 +302,8 @@ class TranslationModule(Seq2SeqTransformer):
             data_dir=hparams.data_dir,
             max_source_length=hparams.max_source_length,
             prefix=self.model.config.prefix or "",
+            src_lang=self.hparams.src_lang,
+            tgt_lang=self.hparams.tgt_lang
         )
 
         return dataset
