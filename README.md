@@ -43,6 +43,8 @@ CUDA_VISIBLE_DEVICES=0 WANDB_MODE=dryrun python ../transformers/examples/seq2seq
 --data_dir=$HOME/data/parallel_text_corpora/wmt_en_ro \
 --model_name_or_path=Helsinki-NLP/opus-mt-en-ro \
 --learning_rate=3e-5 \
+--max_source_length=128 \
+--max_target_length=128 \
 --train_batch_size=32 \
 --eval_batch_size=32 \
 --output_dir=en-ro-helsinki \
@@ -57,11 +59,14 @@ CUDA_VISIBLE_DEVICES=0 WANDB_MODE=dryrun python ../transformers/examples/seq2seq
 --logger wandb \
 --wandb_project machine-translation
 ```
+* [en-ro training progress](https://app.wandb.ai/dertilo/machine-translation/runs/20inpc06/overview?workspace=user-)
 * evaluate
 ```shell script
 python ../transformers/examples/seq2seq/run_eval.py ~/data/parallel_text_corpora/wmt_en_ro/test.source output.txt Helsinki-NLP/opus-mt-en-ro --reference_path ~/data/parallel_text_corpora/wmt_en_ro/test.target --score_path scores.json --metric bleu --bs 32 --fp16
 cat scores.json
 {"bleu": 27.651824005955024}
+CUDA_VISIBLE_DEVICES=1 python ../transformers/examples/seq2seq/run_eval.py ~/data/parallel_text_corpora/wmt_en_ro/test.source output.txt en-ro-helsinki/best_tfmr --reference_path ~/data/parallel_text_corpora/wmt_en_ro/test.target --score_path scores.json --metric bleu --bs 32 --fp16
+
 ```
 
 ## IWSLT'14 German to English [see](https://github.com/pytorch/fairseq/tree/master/examples/translation)
