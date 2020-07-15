@@ -1,11 +1,17 @@
 from enum import Enum
+from functools import partial
+
+import torch
+from seq2seq.utils import trim_batch
 
 from torch.utils.data import DataLoader, Dataset
 
 DataSetType = Enum("DataSetType", "train val test")
 
 
-def build_dataloader(hparams, dataset: Dataset, shuffle: bool = False) -> DataLoader:
+def build_dataloader(
+    hparams, dataset: Dataset, pad_token_id: int, shuffle: bool = False
+) -> DataLoader:
 
     batch_size = getattr(
         hparams,
@@ -20,7 +26,7 @@ def build_dataloader(hparams, dataset: Dataset, shuffle: bool = False) -> DataLo
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
-        collate_fn=dataset.collate_fn,
+        collate_fn=partial(collate_fn, pad_token_id=pad_token_id),
         shuffle=shuffle,
         num_workers=hparams.num_workers,
         sampler=sampler,
@@ -45,3 +51,17 @@ def calc_loss(batch, model, pad_token_id):
     )
     loss = outputs[0]
     return loss
+
+
+def collate_fn(batch, pad_token_id) -> dict:
+    input_ids = torch.stack([x["input_ids"] for x in batch])
+    masks = torch.stack([x["attention_mask"] for x in batch])
+    target_ids = torch.stack([x["decoder_input_ids"] for x in batch])
+    y = trim_batch(target_ids, pad_token_id)
+    source_ids, source_mask = trim_batch(input_ids, pad_token_id, attention_mask=masks)
+    batch = {
+        "input_ids": source_ids,
+        "attention_mask": source_mask,
+        "decoder_input_ids": y,
+    }
+    return batch

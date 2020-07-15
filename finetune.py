@@ -1,3 +1,5 @@
+import shutil
+
 import argparse
 import glob
 import logging
@@ -161,7 +163,9 @@ class Seq2SeqTransformer(BaseTransformer):
 
     def train_dataloader(self) -> DataLoader:
         dataset = self.build_dataset(DataSetType.train)
-        dataloader = build_dataloader(self.hparams, dataset, shuffle=True)
+        dataloader = build_dataloader(
+            self.hparams, dataset, self.tokenizer.pad_token_id, shuffle=True
+        )
         t_total = (
             (
                 len(dataloader.dataset)
@@ -180,13 +184,11 @@ class Seq2SeqTransformer(BaseTransformer):
 
     def val_dataloader(self) -> DataLoader:
         dataset = self.build_dataset(DataSetType.val)
-        dataloader = build_dataloader(self.hparams, dataset, shuffle=False)
-        return dataloader
+        return build_dataloader(self.hparams, dataset, self.tokenizer.pad_token_id)
 
     def test_dataloader(self) -> DataLoader:
         dataset = self.build_dataset(DataSetType.test)
-        dataloader = build_dataloader(self.hparams, dataset, shuffle=False)
-        return dataloader
+        return build_dataloader(self.hparams, dataset, self.tokenizer.pad_token_id)
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
@@ -303,7 +305,7 @@ class TranslationModule(Seq2SeqTransformer):
             max_source_length=hparams.max_source_length,
             prefix=self.model.config.prefix or "",
             src_lang=self.hparams.src_lang,
-            tgt_lang=self.hparams.tgt_lang
+            tgt_lang=self.hparams.tgt_lang,
         )
 
         return dataset
@@ -317,6 +319,8 @@ class TranslationModule(Seq2SeqTransformer):
 
 
 def main(args, model=None) -> Seq2SeqTransformer:
+    if args.output_dir == "debug":
+        shutil.rmtree(args.output_dir)
     Path(args.output_dir).mkdir(exist_ok=True)
     if len(os.listdir(args.output_dir)) > 3 and args.do_train:
         raise ValueError(
