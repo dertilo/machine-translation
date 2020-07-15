@@ -19,12 +19,11 @@ from transformers import (
 )
 
 # based on: https://github.com/huggingface/transformers/blob/master/examples/seq2seq/distillation.py
-
+from common import CELOSS_IGNORE_IDX
 from finetune import TranslationModule
 from finetune import main as ft_main
 from seq2seq.initialization_utils import init_student, copy_layers
 from seq2seq.utils import (
-    use_task_specific_params,
     SummarizationDataset,
     pickle_load,
     freeze_params,
@@ -49,7 +48,7 @@ class BartTranslationDistiller(TranslationModule):
 
         super().__init__(hparams, model=student, config=student_cfg)
         self.teacher = teacher
-        use_task_specific_params(self.teacher, "summarization")
+        # use_task_specific_params(self.teacher, "summarization")
         freeze_params(self.teacher)
         self.sanity_check_gradients()
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
@@ -238,7 +237,7 @@ class BartTranslationDistiller(TranslationModule):
         # fmt: on
         return parser
 
-    def _step(self, batch):
+    def _calc_losses(self, batch):
         # assert is_frozen(self.teacher)
         pad_token_id = self.tokenizer.pad_token_id
         input_ids, src_mask, y = (
@@ -248,7 +247,7 @@ class BartTranslationDistiller(TranslationModule):
         )
         decoder_input_ids = y[:, :-1].contiguous()
         labels = y[:, 1:].clone()
-        labels[y[:, 1:] == pad_token_id] = -100
+        labels[y[:, 1:] == pad_token_id] = CELOSS_IGNORE_IDX
         # noinspection PyCallingNonCallable
         sloss, slogits, dec_hidden, enc_outputs, enc_hidden_state = self(
             input_ids,
@@ -404,8 +403,8 @@ if __name__ == "__main__":
 --tgt_lang=ro_RO \
 --model_name_or_path IGNORED \
 --learning_rate=3e-4 \
---train_batch_size=32 \
---eval_batch_size=32 \
+--train_batch_size=4 \
+--eval_batch_size=4 \
 --teacher sshleifer/tiny-mbart \
 --tokenizer_name sshleifer/tiny-mbart \
 --warmup_steps 500 \

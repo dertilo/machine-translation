@@ -1,4 +1,9 @@
 from enum import Enum
+
+from torch import nn
+from torch.nn import Module
+from typing import Dict
+
 from functools import partial
 
 import torch
@@ -29,7 +34,10 @@ def build_dataloader(
     return dataloader
 
 
-def calc_loss(batch, model, pad_token_id):
+CELOSS_IGNORE_IDX = nn.CrossEntropyLoss().ignore_index
+
+
+def calc_loss(batch:Dict, model:Module, pad_token_id:int):
     source_ids, source_mask, y = (
         batch["input_ids"],
         batch["attention_mask"],
@@ -37,7 +45,7 @@ def calc_loss(batch, model, pad_token_id):
     )
     y_ids = y[:, :-1].contiguous()
     lm_labels = y[:, 1:].clone()
-    lm_labels[y[:, 1:] == pad_token_id] = -100
+    lm_labels[y[:, 1:] == pad_token_id] = CELOSS_IGNORE_IDX
     outputs = model(
         source_ids,
         attention_mask=source_mask,

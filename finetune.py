@@ -83,14 +83,12 @@ class Seq2SeqTransformer(BaseTransformer):
         )
         return lmap(str.strip, gen_text)
 
-    def _step(self, batch: dict) -> Tuple:
-        pad_token_id = self.tokenizer.pad_token_id
-        model = self.model
-        loss = calc_loss(batch, model, pad_token_id)
+    def _calc_losses(self, batch: dict) -> Tuple:
+        loss = calc_loss(batch, self.model, self.tokenizer.pad_token_id)
         return (loss,)
 
     def training_step(self, batch, batch_idx) -> Dict:
-        loss_tensors = self._step(batch)
+        loss_tensors = self._calc_losses(batch)
         logs = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
         return {"loss": loss_tensors[0], "log": logs}
 
@@ -145,7 +143,7 @@ class Seq2SeqTransformer(BaseTransformer):
         gen_time = (time.time() - t0) / source_ids.shape[0]
         preds = self.ids_to_clean_text(generated_ids)
         target = self.ids_to_clean_text(y)
-        loss_tensors = self._step(batch)
+        loss_tensors = self._calc_losses(batch)
         base_metrics = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
         rouge: Dict = self.calc_generative_metrics(preds, target)
         summ_len = np.mean(lmap(len, generated_ids))
