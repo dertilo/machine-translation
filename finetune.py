@@ -14,8 +14,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from lightning_base import BaseTransformer, add_generic_args, generic_train
-from transformers import get_linear_schedule_with_warmup
-
+from transformers import get_linear_schedule_with_warmup, MBartTokenizer
 
 from seq2seq.utils import (
     SummarizationDataset,
@@ -53,7 +52,6 @@ class Seq2SeqTransformer(BaseTransformer):
         self.step_count = 0
         self.metrics = defaultdict(list)
 
-        self.dataset_kwargs: dict = get_dataset_kwargs(self.hparams, self.model)
         self.n_obs = get_n_obs(self.hparams)
         self.target_lens = get_target_lens(self.hparams)
 
@@ -256,8 +254,24 @@ class TranslationModule(Seq2SeqTransformer):
     metric_names = ["bleu"]
     val_metric = "bleu"
 
+    def __init__(self, hparams, **kwargs):
+        super().__init__(hparams, **kwargs)
+        #TODO(tilo)!!
+        assert False,"dataset_kwargs is shit!"
+        self.dataset_kwargs["src_lang"] = hparams.src_lang
+        self.dataset_kwargs["tgt_lang"] = hparams.tgt_lang
+        if self.model.config.decoder_start_token_id is None and isinstance(self.tokenizer, MBartTokenizer):
+            self.decoder_start_token_id = self.tokenizer.lang_code_to_id[hparams.tgt_lang]
+
     def calc_generative_metrics(self, preds, target) -> dict:
         return calculate_bleu_score(preds, target)
+
+    @staticmethod
+    def add_model_specific_args(parser, root_dir):
+        parser = Seq2SeqTransformer.add_model_specific_args(parser, root_dir)
+        parser.add_argument("--src_lang", type=str, default="", required=False)
+        parser.add_argument("--tgt_lang", type=str, default="", required=False)
+        return parser
 
 
 def main(args, model=None) -> Seq2SeqTransformer:
@@ -320,6 +334,8 @@ def main(args, model=None) -> Seq2SeqTransformer:
 if __name__ == "__main__":
     debug_args = """
 --data_dir=some_data \
+--src_lang=en_XX \
+--tgt_lang=ro_RO \
 --model_name_or_path=sshleifer/tiny-mbart \
 --learning_rate=3e-5 \
 --train_batch_size=32 \
