@@ -10,18 +10,13 @@ DataSetType = Enum("DataSetType", "train val test")
 
 
 def build_dataloader(
-    hparams, dataset: Dataset, pad_token_id: int, shuffle: bool = False
+    hparams,
+    dataset: Dataset,
+    pad_token_id: int,
+    batch_size: int,
+    shuffle: bool = False,
+    sampler=None,
 ) -> DataLoader:
-
-    batch_size = getattr(
-        hparams,
-        "train_batch_size" if dataset.type_path == "train" else "eval_batch_size",
-    )
-    sampler = None
-    if hparams.sortish_sampler and dataset.type_path == "train":
-        assert hparams.gpus <= 1  # TODO: assert earlier
-        sampler = dataset.make_sortish_sampler(batch_size)
-        shuffle = False
 
     dataloader = DataLoader(
         dataset,

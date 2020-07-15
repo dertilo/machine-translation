@@ -162,14 +162,26 @@ class Seq2SeqTransformer(BaseTransformer):
 
     def train_dataloader(self) -> DataLoader:
         dataset = self.build_dataset(DataSetType.train)
+        batch_size = self.hparams.train_batch_size
+
+        if self.hparams.sortish_sampler:
+            assert self.hparams.gpus <= 1  # TODO: assert earlier
+            sampler = dataset.make_sortish_sampler(batch_size)
+            shuffle = False
+        else:
+            shuffle = True
+            sampler = None
+
         dataloader = build_dataloader(
-            self.hparams, dataset, self.tokenizer.pad_token_id, shuffle=True
+            self.hparams,
+            dataset,
+            self.tokenizer.pad_token_id,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            sampler=sampler,
         )
         t_total = (
-            (
-                len(dataloader.dataset)
-                // (self.hparams.train_batch_size * max(1, self.hparams.gpus))
-            )
+            (len(dataloader.dataset) // (batch_size * max(1, self.hparams.gpus)))
             // self.hparams.gradient_accumulation_steps
             * float(self.hparams.num_train_epochs)
         )
@@ -183,11 +195,21 @@ class Seq2SeqTransformer(BaseTransformer):
 
     def val_dataloader(self) -> DataLoader:
         dataset = self.build_dataset(DataSetType.val)
-        return build_dataloader(self.hparams, dataset, self.tokenizer.pad_token_id)
+        return build_dataloader(
+            self.hparams,
+            dataset,
+            self.tokenizer.pad_token_id,
+            batch_size=self.hparams.eval_batch_size,
+        )
 
     def test_dataloader(self) -> DataLoader:
         dataset = self.build_dataset(DataSetType.test)
-        return build_dataloader(self.hparams, dataset, self.tokenizer.pad_token_id)
+        return build_dataloader(
+            self.hparams,
+            dataset,
+            self.tokenizer.pad_token_id,
+            batch_size=self.hparams.eval_batch_size,
+        )
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
