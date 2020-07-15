@@ -5,6 +5,7 @@ import os
 import time
 from abc import abstractmethod
 from collections import defaultdict
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -31,11 +32,9 @@ from seq2seq.utils import (
 from seq2seq.callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
 
 from common import (
-    get_n_obs,
-    get_target_lens,
-    get_dataset_kwargs,
     build_dataloader,
     calc_loss,
+    DataSetType,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,9 +50,6 @@ class Seq2SeqTransformer(BaseTransformer):
         pickle_save(self.hparams, self.hparams_save_path)
         self.step_count = 0
         self.metrics = defaultdict(list)
-
-        self.n_obs = get_n_obs(self.hparams)
-        self.target_lens = get_target_lens(self.hparams)
 
         if self.hparams.freeze_embeds:
             self.freeze_embeds()
@@ -128,6 +124,10 @@ class Seq2SeqTransformer(BaseTransformer):
         save_json(self.metrics, self.metrics_save_path)
 
     @abstractmethod
+    def build_dataset(self, dataset_type: DataSetType):
+        raise NotImplementedError
+
+    @abstractmethod
     def calc_generative_metrics(self, preds, target) -> Dict:
         raise NotImplementedError
 
@@ -159,9 +159,8 @@ class Seq2SeqTransformer(BaseTransformer):
         return self.validation_epoch_end(outputs, prefix="test")
 
     def train_dataloader(self) -> DataLoader:
-        dataloader = build_dataloader(
-            self.hparams, self.tokenizer, self.model, "train", shuffle=True
-        )
+        dataset = self.build_dataset(DataSetType.train)
+        dataloader = build_dataloader(self.hparams, dataset, shuffle=True)
         t_total = (
             (
                 len(dataloader.dataset)
@@ -179,10 +178,14 @@ class Seq2SeqTransformer(BaseTransformer):
         return dataloader
 
     def val_dataloader(self) -> DataLoader:
-        return build_dataloader(self.hparams, self.tokenizer, self.model, "val")
+        dataset = self.build_dataset(DataSetType.val)
+        dataloader = build_dataloader(self.hparams, dataset, shuffle=False)
+        return dataloader
 
     def test_dataloader(self) -> DataLoader:
-        return build_dataloader(self.hparams, self.tokenizer, self.model, "test")
+        dataset = self.build_dataset(DataSetType.test)
+        dataloader = build_dataloader(self.hparams, dataset, shuffle=False)
+        return dataloader
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
@@ -256,15 +259,51 @@ class TranslationModule(Seq2SeqTransformer):
 
     def __init__(self, hparams, **kwargs):
         super().__init__(hparams, **kwargs)
-        #TODO(tilo)!!
-        assert False,"dataset_kwargs is shit!"
-        self.dataset_kwargs["src_lang"] = hparams.src_lang
-        self.dataset_kwargs["tgt_lang"] = hparams.tgt_lang
-        if self.model.config.decoder_start_token_id is None and isinstance(self.tokenizer, MBartTokenizer):
-            self.decoder_start_token_id = self.tokenizer.lang_code_to_id[hparams.tgt_lang]
+
+        if self.model.config.decoder_start_token_id is None and isinstance(
+            self.tokenizer, MBartTokenizer
+        ):
+            self.decoder_start_token_id = self.tokenizer.lang_code_to_id[
+                hparams.tgt_lang
+            ]
 
     def calc_generative_metrics(self, preds, target) -> dict:
         return calculate_bleu_score(preds, target)
+
+    def build_dataset(self, dataset_type: DataSetType):
+        hparams = self.hparams
+
+        n_observations_per_split = {
+            "train": hparams.n_train,
+            "val": hparams.n_val,
+            "test": hparams.n_test,
+        }
+        n_obs = {k: v if v >= 0 else None for k, v in n_observations_per_split.items()}
+
+        target_lens = {
+            "train": hparams.max_target_length,
+            "val": hparams.val_max_target_length,
+            "test": hparams.test_max_target_length,
+        }
+        assert target_lens["train"] <= target_lens["val"], f"target_lens: {target_lens}"
+        assert (
+            target_lens["train"] <= target_lens["test"]
+        ), f"target_lens: {target_lens}"
+
+        type_path = dataset_type.name
+        max_target_length = target_lens[type_path]
+
+        dataset = SummarizationDataset(
+            self.tokenizer,
+            type_path=type_path,
+            n_obs=n_obs[type_path],
+            max_target_length=max_target_length,
+            data_dir=hparams.data_dir,
+            max_source_length=hparams.max_source_length,
+            prefix=self.model.config.prefix or "",
+        )
+
+        return dataset
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
