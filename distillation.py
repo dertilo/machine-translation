@@ -19,6 +19,8 @@ from transformers import (
 )
 
 # based on: https://github.com/huggingface/transformers/blob/master/examples/seq2seq/distillation.py
+from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
+
 from common import CELOSS_IGNORE_IDX
 from finetune import TranslationModule
 from finetune import main as ft_main
@@ -249,7 +251,7 @@ class BartTranslationDistiller(TranslationModule):
         labels = y[:, 1:].clone()
         labels[y[:, 1:] == pad_token_id] = CELOSS_IGNORE_IDX
         # noinspection PyCallingNonCallable
-        sloss, slogits, dec_hidden, enc_outputs, enc_hidden_state = self(
+        so:Seq2SeqLMOutput = self(
             input_ids,
             attention_mask=src_mask,
             decoder_input_ids=decoder_input_ids,
@@ -259,7 +261,7 @@ class BartTranslationDistiller(TranslationModule):
         )
 
         def zero_tensor():
-            return torch.tensor(0.0).type_as(sloss)
+            return torch.tensor(0.0).type_as(so.loss)
 
         loss_encoder, hid_loss_enc, hid_loss_dec = (
             zero_tensor(),
@@ -268,26 +270,26 @@ class BartTranslationDistiller(TranslationModule):
         )
         if self.different_encoder:
             with torch.no_grad():
-                teacher_enc_outputs, teacher_enc_hid, _ = self.teacher.model.encoder(
+                to_enc:BaseModelOutput = self.teacher.model.encoder(
                     input_ids, attention_mask=src_mask, output_hidden_states=True
                 )
             if self.hparams.alpha_encoder_loss > 0:
                 loss_encoder = self.calc_mse_loss(
-                    enc_outputs, teacher_enc_outputs, src_mask
+                    to_enc.last_hidden_state,so.encoder_last_hidden_state, src_mask
                 )
 
             hid_loss_enc = self.calc_hidden_loss(
                 src_mask,
-                enc_hidden_state,
-                teacher_enc_hid,
+                so.encoder_hidden_states,
+                to_enc.hidden_states,
                 self.hparams.e_layer_to_copy,
             )
 
-        teacher_enc_outputs = (enc_outputs,)
+        teacher_enc_outputs = (so.encoder_last_hidden_state,)
         assert isinstance(teacher_enc_outputs, tuple), type(teacher_enc_outputs)
 
         with torch.no_grad():
-            tloss, tlogits, tdec_hidden, _ = self.teacher(
+            to:Seq2SeqLMOutput = self.teacher(
                 input_ids,
                 attention_mask=src_mask,
                 encoder_outputs=teacher_enc_outputs,
@@ -297,20 +299,20 @@ class BartTranslationDistiller(TranslationModule):
             )
         dec_mask = decoder_input_ids.ne(pad_token_id)
         loss_ce, s_logits_slct, t_logits_slct = self.calc_ce_loss(
-            dec_mask, slogits, tlogits
+            dec_mask, so.logits, to.logits
         )
         if self.alpha_hid > 0:
             hid_loss_dec = self.calc_hidden_loss(
-                dec_mask, dec_hidden, tdec_hidden, self.hparams.d_layer_to_copy
+                dec_mask, so.decoder_hidden_states, to.decoder_hidden_states, self.hparams.d_layer_to_copy
             )
 
         blended_loss = (
             self.alpha_ce * loss_ce
-            + self.alpha_mlm * sloss
+            + self.alpha_mlm * so.loss
             + self.hparams.alpha_encoder_loss * loss_encoder
             + self.hparams.alpha_hid * (hid_loss_enc + hid_loss_dec)
         )
-        return blended_loss, loss_ce, sloss, loss_encoder, hid_loss_enc, hid_loss_dec
+        return blended_loss, loss_ce, so.loss, loss_encoder, hid_loss_enc, hid_loss_dec
 
     def calc_hidden_loss(self, attention_mask, hidden_states, hidden_states_T, matches):
         assert not isinstance(
