@@ -17,8 +17,10 @@ class Seq2SeqDataset(Dataset):
         type_path="train",
         max_src_tgt_len=(1024, 56),
         langs=Tuple[str, str],
+        prefix="",
     ):
         super().__init__()
+        self.prefix = prefix
         self.type_path = type_path
         self.tokenizer = tokenizer
         self.max_src_tgt_len = max_src_tgt_len
@@ -42,11 +44,19 @@ class Seq2SeqDataset(Dataset):
         )
         self.pad_token_id = tokenizer.pad_token_id
 
-    def _tokenize(self, text: str, lang: str, max_length):
-        pad_to_max_length = True
-        return_tensors = "pt"
+    def _tokenize(
+        self,
+        text: str,
+        lang: str,
+        max_length,
+        pad_to_max_length=True,
+        return_tensors="pt",
+    ):
+
         extra_kw = (
-            {"add_prefix_space": True} if isinstance(tokenizer, BartTokenizer) else {}
+            {"add_prefix_space": True}
+            if isinstance(self.tokenizer, BartTokenizer)
+            else {}
         )
 
         self.tokenizer.set_lang(lang)
@@ -61,14 +71,17 @@ class Seq2SeqDataset(Dataset):
         assert tokenized.input_ids.shape[1] == max_length
         return tokenized
 
+    def _preprocess(self, text: str):
+        return self.prefix + text.strip()
+
     def __len__(self):
         return len(self.src)
 
     def __getitem__(self, index):
         srcl, tgtl = self.langs
         msrcl, mtgtl = self.max_src_tgt_len
-        src = self._tokenize(self.src[index]["text"], srcl, msrcl)
-        tgt = self._tokenize(self.tgt[index]["text"], tgtl, mtgtl)
+        src = self._tokenize(self._preprocess(self.src[index]["text"]), srcl, msrcl)
+        tgt = self._tokenize(self._preprocess(self.tgt[index]["text"]), tgtl, mtgtl)
 
         return {
             "input_ids": src["input_ids"],
@@ -89,12 +102,11 @@ class Seq2SeqDataset(Dataset):
 
 
 if __name__ == "__main__":
-    tokenizer = AutoTokenizer.from_pretrained(
-        "sshleifer/tiny-mbart", cache_dir="cache_dir",
-    )
 
     dataset = Seq2SeqDataset(
-        tokenizer,
+        tokenizer=AutoTokenizer.from_pretrained(
+            "sshleifer/tiny-mbart", cache_dir="cache_dir",
+        ),
         type_path="train",
         data_dir=os.environ["HOME"] + "/code/NLP/MT/machine-translation/some_data",
         langs=("en_XX", "ro_RO"),
