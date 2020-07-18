@@ -1,11 +1,9 @@
 import os
-from typing import NamedTuple, Tuple
+from typing import Tuple
 
-from seq2seq.utils import encode_file, lmap, SortishSampler, trim_batch
-
-
+from nlp import load_dataset
+from seq2seq.utils import SortishSampler
 from torch.utils.data import Dataset
-from nlp import load_dataset, Split
 from transformers import MBartTokenizer, AutoTokenizer, BartTokenizer
 
 
@@ -78,6 +76,7 @@ class Seq2SeqDataset(Dataset):
         return len(self.src)
 
     def __getitem__(self, index):
+        index = int(index)
         srcl, tgtl = self.langs
         msrcl, mtgtl = self.max_src_tgt_len
         src = self._tokenize(self._preprocess(self.src[index]["text"]), srcl, msrcl)
@@ -89,16 +88,10 @@ class Seq2SeqDataset(Dataset):
             "decoder_input_ids": tgt["input_ids"],
         }
 
-    @property
-    def src_lens(self):  # Can delete?
-        return lmap(len, self.src)
-
-    @property
-    def tgt_lens(self):
-        return lmap(len, self.tgt)
 
     def make_sortish_sampler(self, batch_size):
-        return SortishSampler(self.src, batch_size)
+        num_chars = [list(range(len(d["text"]))) for d in self.src]
+        return SortishSampler(num_chars, batch_size)
 
 
 if __name__ == "__main__":
@@ -112,4 +105,4 @@ if __name__ == "__main__":
         langs=("en_XX", "ro_RO"),
     )
 
-    dataset[0]
+    print(dataset.src[0])
