@@ -1,81 +1,103 @@
 import os
+from typing import NamedTuple, Tuple
 
 from seq2seq.utils import encode_file, lmap, SortishSampler, trim_batch
 
-try:
-    import git
-except:
-    print("NO GIT on HPC!")
 
 from torch.utils.data import Dataset
+from nlp import load_dataset, Split
+from transformers import MBartTokenizer, AutoTokenizer, BartTokenizer
 
 
 class Seq2SeqDataset(Dataset):
     def __init__(
         self,
-        tokenizer,
+        tokenizer: MBartTokenizer,
         data_dir,
         type_path="train",
-        max_source_length=1024,
-        max_target_length=56,
-        n_obs=None,
-        overwrite_cache=False,
-        prefix="",
-        src_lang=None,
-        tgt_lang=None,
+        max_src_tgt_len=(1024, 56),
+        langs=Tuple[str, str],
     ):
         super().__init__()
         self.type_path = type_path
-        # FIXME: the rstrip logic strips all the chars, it seems.
-        tok_name = tokenizer.__class__.__name__.lower().rstrip("tokenizer")
-        if hasattr(tokenizer, "set_lang") and src_lang is not None:
-            tokenizer.set_lang(src_lang)  # HACK: only applies to mbart
-        self.source = encode_file(
-            tokenizer,
-            os.path.join(data_dir, type_path + ".source"),
-            max_source_length,
-            overwrite_cache=overwrite_cache,
-            prefix=prefix,
-            tok_name=tok_name,
+        self.tokenizer = tokenizer
+        self.max_src_tgt_len = max_src_tgt_len
+        self.langs = langs
+
+        path = os.path.join(data_dir, type_path)
+        dummy_split = "train"  # TODO(tilo): WTF!
+        self.src = load_dataset(
+            "text",
+            name=f"{type_path}-src",
+            data_files=[f"{path}.source"],
+            cache_dir="huggingface_cache",
+            split=dummy_split,
         )
-        tgt_path = os.path.join(data_dir, type_path + ".target")
-        if hasattr(tokenizer, "set_lang"):
-            assert (
-                tgt_lang is not None
-            ), "--tgt_lang must be passed to build a translation"
-            tokenizer.set_lang(tgt_lang)  # HACK: only applies to mbart
-        self.target = encode_file(
-            tokenizer,
-            tgt_path,
-            max_target_length,
-            overwrite_cache=overwrite_cache,
-            tok_name=tok_name,
+        self.tgt = load_dataset(
+            "text",
+            name=f"{type_path}-tgt",
+            data_files=[f"{path}.target"],
+            cache_dir="huggingface_cache",
+            split=dummy_split,
         )
-        if n_obs is not None:
-            self.source = self.source[:n_obs]
-            self.target = self.target[:n_obs]
         self.pad_token_id = tokenizer.pad_token_id
 
+    def _tokenize(self, text: str, lang: str, max_length):
+        pad_to_max_length = True
+        return_tensors = "pt"
+        extra_kw = (
+            {"add_prefix_space": True} if isinstance(tokenizer, BartTokenizer) else {}
+        )
+
+        self.tokenizer.set_lang(lang)
+        tokenized = self.tokenizer(
+            [text],
+            max_length=max_length,
+            padding="max_length" if pad_to_max_length else None,
+            truncation=True,
+            return_tensors=return_tensors,
+            **extra_kw,
+        )
+        assert tokenized.input_ids.shape[1] == max_length
+        return tokenized
+
     def __len__(self):
-        return len(self.source)
+        return len(self.src)
 
     def __getitem__(self, index):
-        source_ids = self.source[index]["input_ids"].squeeze()
-        target_ids = self.target[index]["input_ids"].squeeze()
-        src_mask = self.source[index]["attention_mask"].squeeze()
+        srcl, tgtl = self.langs
+        msrcl, mtgtl = self.max_src_tgt_len
+        src = self._tokenize(self.src[index]["text"], srcl, msrcl)
+        tgt = self._tokenize(self.tgt[index]["text"], tgtl, mtgtl)
+
         return {
-            "input_ids": source_ids,
-            "attention_mask": src_mask,
-            "decoder_input_ids": target_ids,
+            "input_ids": src["input_ids"],
+            "attention_mask": src["attention_mask"],
+            "decoder_input_ids": tgt["input_ids"],
         }
 
     @property
     def src_lens(self):  # Can delete?
-        return lmap(len, self.source)
+        return lmap(len, self.src)
 
     @property
     def tgt_lens(self):
-        return lmap(len, self.target)
+        return lmap(len, self.tgt)
 
     def make_sortish_sampler(self, batch_size):
-        return SortishSampler(self.source, batch_size)
+        return SortishSampler(self.src, batch_size)
+
+
+if __name__ == "__main__":
+    tokenizer = AutoTokenizer.from_pretrained(
+        "sshleifer/tiny-mbart", cache_dir="cache_dir",
+    )
+
+    dataset = Seq2SeqDataset(
+        tokenizer,
+        type_path="train",
+        data_dir=os.environ["HOME"] + "/code/NLP/MT/machine-translation/some_data",
+        langs=("en_XX", "ro_RO"),
+    )
+
+    dataset[0]
