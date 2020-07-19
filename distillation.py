@@ -49,7 +49,7 @@ class BartTranslationDistiller(TranslationModule):
         student, student_cfg, teacher = self.pre_init(hparams)
 
         super().__init__(hparams, model=student, config=student_cfg)
-        self.teacher = teacher
+        self.teacher: BartForConditionalGeneration = teacher
         # use_task_specific_params(self.teacher, "summarization")
         freeze_params(self.teacher)
         self.sanity_check_gradients()
@@ -268,31 +268,14 @@ class BartTranslationDistiller(TranslationModule):
             so.encoder_hidden_states,
         )
 
-        teacher_enc_outputs = (so.encoder_last_hidden_state,)
-        assert isinstance(teacher_enc_outputs, tuple), type(teacher_enc_outputs)
-
-        with torch.no_grad():
-            to: Seq2SeqLMOutput = self.teacher(
-                input_ids,
-                attention_mask=src_mask,
-                encoder_outputs=teacher_enc_outputs,
-                decoder_input_ids=decoder_input_ids,
-                lm_labels=labels,
-                output_hidden_states=True,
-            )
-        dec_mask = decoder_input_ids.ne(pad_token_id)
-        loss_ce, s_logits_slct, t_logits_slct = self.calc_ce_loss(
-            dec_mask, so.logits, to.logits
+        hid_loss_dec, loss_ce = self._decoder_losses(
+            decoder_input_ids,
+            input_ids,  # TODO(tilo): input_ids should not be necessary!
+            labels,
+            pad_token_id,
+            so,
+            src_mask,
         )
-        if self.alpha_hid > 0:
-            hid_loss_dec = calc_hidden_loss(
-                dec_mask,
-                so.decoder_hidden_states,
-                to.decoder_hidden_states,
-                self.hparams.d_layer_to_copy,
-            )
-        else:
-            hid_loss_dec = torch.tensor(0.0).type_as(so.loss)
 
         blended_loss = (
             self.alpha_ce * loss_ce
@@ -301,6 +284,38 @@ class BartTranslationDistiller(TranslationModule):
             + self.hparams.alpha_hid * (hid_loss_enc + hid_loss_dec)
         )
         return blended_loss, loss_ce, so.loss, loss_encoder, hid_loss_enc, hid_loss_dec
+
+    def _decoder_losses(
+        self,
+        decoder_input_ids,
+        input_ids,
+        labels,
+        pad_token_id,
+        student_out: Seq2SeqLMOutput,
+        src_mask,
+    ):
+        with torch.no_grad():
+            to: Seq2SeqLMOutput = self.teacher(
+                input_ids,
+                attention_mask=src_mask,
+                encoder_outputs=(student_out.encoder_last_hidden_state,),
+                # seems to alter BART-behavior in a way that only the decoder is used -> why not explicitly calling the decoder here?
+                decoder_input_ids=decoder_input_ids,
+                lm_labels=labels,
+                output_hidden_states=True,
+            )
+        dec_mask = decoder_input_ids.ne(pad_token_id)
+        loss_ce, _, _ = self.calc_ce_loss(dec_mask, student_out.logits, to.logits)
+        if self.alpha_hid > 0:
+            hid_loss_dec = calc_hidden_loss(
+                dec_mask,
+                student_out.decoder_hidden_states,
+                to.decoder_hidden_states,
+                self.hparams.d_layer_to_copy,
+            )
+        else:
+            hid_loss_dec = torch.tensor(0.0).type_as(student_out.loss)
+        return hid_loss_dec, loss_ce
 
     def _encoder_losses(self, input_ids, src_mask, loss, last_hid, hid_states):
         loss_encoder, hid_loss_enc = (
