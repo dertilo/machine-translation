@@ -29,7 +29,7 @@ def marian_tokenize(
         max_length=msrcl,
         pad_to_max_length=True,
         truncation_strategy="only_first",
-        padding="longest",
+        padding="max_length", #TODO(tilo): redundant!!
     )
     model_inputs: BatchEncoding = tok(src_texts, **tokenizer_kwargs)
     tok.current_spm = tok.spm_target
@@ -86,7 +86,7 @@ class TranslationDataset(Dataset):
         decoder_inputs, model_inputs = marian_tokenize(
             [src_text], [tgt_text], self.tokenizer, self.max_src_tgt_len
         )
-        print()
+        assert model_inputs.input_ids.shape[1] == self.max_src_tgt_len[0]
         return {
             "input_ids": model_inputs["input_ids"],
             "attention_mask": model_inputs["attention_mask"],
