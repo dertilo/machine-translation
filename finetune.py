@@ -39,7 +39,7 @@ from common import (
     DataSetType,
     trim_seq2seq_batch,
 )
-from datasets import Seq2SeqDataset
+from datasets import TranslationDataset
 
 logger = logging.getLogger(__name__)
 
@@ -312,13 +312,12 @@ class TranslationModule(Seq2SeqTransformer):
         type_path = dataset_type.name
         max_target_length = target_lens[type_path]
 
-        dataset = Seq2SeqDataset(
+        dataset = TranslationDataset(
             self.tokenizer,
             type_path=type_path,
             max_src_tgt_len=(hparams.max_source_length,max_target_length),
             data_dir=hparams.data_dir,
             prefix=self.model.config.prefix or "",
-            langs=(self.hparams.src_lang,self.hparams.tgt_lang)
         )
 
         return dataset
