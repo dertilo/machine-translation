@@ -98,7 +98,7 @@ class BartTranslationDistiller(TranslationModule):
         student = BartForConditionalGeneration(student_cfg)
         student, _ = init_student(student, teacher)
         save_dir = self.output_dir.joinpath("student")
-        self.copy_to_student(
+        self.copy_to_student(  # TODO(tilo): why is this necessary?
             d_layers_to_copy, e_layers_to_copy, hparams, student, teacher
         )
         student.save_pretrained(save_dir)
@@ -260,30 +260,13 @@ class BartTranslationDistiller(TranslationModule):
             output_attentions=False,
         )
 
-        def zero_tensor():
-            return torch.tensor(0.0).type_as(so.loss)
-
-        loss_encoder, hid_loss_enc, hid_loss_dec = (
-            zero_tensor(),
-            zero_tensor(),
-            zero_tensor(),
+        hid_loss_enc, loss_encoder = self._encoder_losses(
+            input_ids,
+            src_mask,
+            so.loss,
+            so.encoder_last_hidden_state,
+            so.encoder_hidden_states,
         )
-        if self.different_encoder:
-            with torch.no_grad():
-                to_enc: BaseModelOutput = self.teacher.model.encoder(
-                    input_ids, attention_mask=src_mask, output_hidden_states=True
-                )
-            if self.hparams.alpha_encoder_loss > 0:
-                loss_encoder = self.calc_mse_loss(
-                    to_enc.last_hidden_state, so.encoder_last_hidden_state, src_mask
-                )
-
-            hid_loss_enc = self.calc_hidden_loss(
-                src_mask,
-                so.encoder_hidden_states,
-                to_enc.hidden_states,
-                self.hparams.e_layer_to_copy,
-            )
 
         teacher_enc_outputs = (so.encoder_last_hidden_state,)
         assert isinstance(teacher_enc_outputs, tuple), type(teacher_enc_outputs)
@@ -302,12 +285,14 @@ class BartTranslationDistiller(TranslationModule):
             dec_mask, so.logits, to.logits
         )
         if self.alpha_hid > 0:
-            hid_loss_dec = self.calc_hidden_loss(
+            hid_loss_dec = calc_hidden_loss(
                 dec_mask,
                 so.decoder_hidden_states,
                 to.decoder_hidden_states,
                 self.hparams.d_layer_to_copy,
             )
+        else:
+            hid_loss_dec = torch.tensor(0.0).type_as(so.loss)
 
         blended_loss = (
             self.alpha_ce * loss_ce
@@ -317,24 +302,49 @@ class BartTranslationDistiller(TranslationModule):
         )
         return blended_loss, loss_ce, so.loss, loss_encoder, hid_loss_enc, hid_loss_dec
 
-    def calc_hidden_loss(self, attention_mask, hidden_states, hidden_states_T, matches):
-        assert not isinstance(
-            hidden_states, torch.Tensor
-        ), f"expected list or tuple for hidden_states, got tensor of shape {hidden_states.shape}"
-        assert not isinstance(
-            hidden_states_T, torch.Tensor
-        ), f"expected list or tuple for hidden_states_T, got tensor of shape {hidden_states_T.shape}"
-        mask = attention_mask.to(hidden_states[0])
-        valid_count = mask.sum() * hidden_states[0].size(-1)
-        hidden_losses = [
-            (
-                F.mse_loss(hidden_states[i], hidden_states_T[j], reduction="none")
-                * mask.unsqueeze(-1)
-            ).sum()
-            / valid_count
-            for i, j in enumerate(matches)
-        ]
-        return sum(hidden_losses)
+    def _encoder_losses(self, input_ids, src_mask, loss, last_hid, hid_states):
+        loss_encoder, hid_loss_enc = (
+            torch.tensor(0.0).type_as(loss),
+            torch.tensor(0.0).type_as(loss),
+        )
+        if self.different_encoder:
+            with torch.no_grad():
+                to_enc: BaseModelOutput = self.teacher.model.encoder(
+                    input_ids, attention_mask=src_mask, output_hidden_states=True
+                )
+            if self.hparams.alpha_encoder_loss > 0:
+                loss_encoder = self.calc_mse_loss(
+                    to_enc.last_hidden_state, last_hid, src_mask
+                )
+
+            hid_loss_enc = calc_hidden_loss(
+                src_mask,
+                hid_states,
+                to_enc.hidden_states,
+                self.hparams.e_layer_to_copy,
+            )
+        return hid_loss_enc, loss_encoder
+
+
+def calc_hidden_loss(attention_mask, hidden_states, hidden_states_T, matches):
+    # see: https://github.com/dertilo/transformers/blob/281e394889b33d0650bcd13f120c3f75a799679a/examples/seq2seq/distillation.py#L251
+    assert not isinstance(
+        hidden_states, torch.Tensor
+    ), f"expected list or tuple for hidden_states, got tensor of shape {hidden_states.shape}"
+    assert not isinstance(
+        hidden_states_T, torch.Tensor
+    ), f"expected list or tuple for hidden_states_T, got tensor of shape {hidden_states_T.shape}"
+    mask = attention_mask.to(hidden_states[0])
+    valid_count = mask.sum() * hidden_states[0].size(-1)
+    hidden_losses = [
+        (
+            F.mse_loss(hidden_states[i], hidden_states_T[j], reduction="none")
+            * mask.unsqueeze(-1)
+        ).sum()
+        / valid_count
+        for i, j in enumerate(matches)
+    ]
+    return sum(hidden_losses)
 
 
 def create_module(args):
