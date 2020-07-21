@@ -12,21 +12,20 @@ if __name__ == "__main__":
 --learning_rate=3e-4 \
 --train_batch_size=4 \
 --eval_batch_size=4 \
---teacher sshleifer/tiny-mbart \
---tokenizer_name sshleifer/tiny-mbart \
+--teacher Helsinki-NLP/opus-mt-en-ro \
+--tokenizer_name Helsinki-NLP/opus-mt-en-ro \
 --warmup_steps 500 \
 --student_decoder_layers 2 --student_encoder_layers 2 \
---freeze_encoder --freeze_embeds \
+--freeze_embeds \
 --alpha_hid=3. --length_penalty=0.5 \
---gradient_accumulation_steps=2
+--gradient_accumulation_steps=2 \
 --max_target_length=60 --val_max_target_length=60 --test_max_target_length=100 \
 --output_dir=debug \
---num_train_epochs 10 \
+--num_train_epochs 3 \
 --gpus 0 \
 --do_train \
 --do_predict \
---n_val 1000 \
---val_check_interval 0.1 \
+--val_check_interval 0.2 \
 --sortish_sampler \
     """.strip().split()
     # --fp16 \
