@@ -20,6 +20,7 @@ export CUDA_HOME=/usr/local/cuda-10.1
 git clone https://github.com/NVIDIA/apex
 pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./apex
 ```
+* `pip install -r requirements.txt`
 
 #### WMT16 English-Romanian 
 * get data
@@ -29,7 +30,7 @@ tar -xzvf wmt_en_ro.tar.gz
 cat wmt_en_ro/train.source | wc -l
 610319
 ```
-* train
+##### finetuning TODO(tilo)
 ```shell script
 OMP_NUM_THREADS=2 wandb init # on frontend
 
@@ -56,17 +57,28 @@ CUDA_VISIBLE_DEVICES=0 WANDB_MODE=dryrun python ../transformers/examples/seq2seq
 --wandb_project machine-translation
 ```
 * [en-ro training progress](https://app.wandb.ai/dertilo/machine-translation/runs/20inpc06/overview?workspace=user-)
-* evaluate # TODO(tilo)
+
+##### evaluation
+* evaluate helsinki
 ```shell script
-python transformers/examples/seq2seq/run_eval.py Helsinki-NLP/opus-mt-en-ro wmt_en_ro/test.source output.txt  --reference_path wmt_en_ro/test.target --score_path scores.json --task translation --bs 32 --fp16
-python ../transformers/examples/seq2seq/run_eval.py ~/data/parallel_text_corpora/wmt_en_ro/test.source output.txt Helsinki-NLP/opus-mt-en-ro --reference_path ~/data/parallel_text_corpora/wmt_en_ro/test.target --score_path scores.json --metric bleu --bs 32 --fp16
+python ../transformers/examples/seq2seq/run_eval.py \
+  Helsinki-NLP/opus-mt-en-ro \
+  ~/data/parallel_text_corpora/wmt_en_ro/test.source \
+  output.txt \
+  --reference_path ~/data/parallel_text_corpora/wmt_en_ro/test.target \
+  --score_path scores.json \
+  --task translation --bs 32 --fp16
+100%|██████| 63/63 [04:15<00:00,  4.06s/it]
 cat scores.json
 {"bleu": 27.651824005955024}
+```
+* evaluate checkpoint # TODO(tilo)
+```shell script
 CUDA_VISIBLE_DEVICES=1 python ../transformers/examples/seq2seq/run_eval.py ~/data/parallel_text_corpora/wmt_en_ro/test.source output.txt en-ro-helsinki/best_tfmr --reference_path ~/data/parallel_text_corpora/wmt_en_ro/test.target --score_path scores.json --metric bleu --bs 32 --fp16
 ```
 ##### distillation
 ```shell script
-python machine-translation/distillation.py \
+CUDA_VISIBLE_DEVICES=1 WANDB_MODE=dryrun python machine-translation/distillation.py \
 --data_dir=some_data \
 --src_lang=en_XX \
 --tgt_lang=ro_RO \
