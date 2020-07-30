@@ -14,8 +14,6 @@ from transformers import (
     AdamW,
     BartConfig,
     BartForConditionalGeneration,
-    T5Config,
-    T5ForConditionalGeneration,
 )
 
 # based on: https://github.com/huggingface/transformers/blob/master/examples/seq2seq/distillation.py
@@ -26,7 +24,6 @@ from finetune import TranslationModule
 from finetune import main as ft_main
 from seq2seq.initialization_utils import init_student, copy_layers
 from seq2seq.utils import (
-    SummarizationDataset,
     pickle_load,
     freeze_params,
     assert_all_frozen,
@@ -140,13 +137,6 @@ class BartTranslationDistiller(TranslationModule):
             copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
         if self.different_encoder:
             copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy)
-
-    def get_dataset(self, type_path) -> SummarizationDataset:
-        n_obs = self.n_obs[type_path]
-        dataset = SummarizationDataset(
-            self.tokenizer, type_path=type_path, n_obs=n_obs, **self.dataset_kwargs
-        )
-        return dataset
 
     def calc_mse_loss(
         self, teacher_outputs: torch.Tensor, student_outputs: torch.Tensor, mask
