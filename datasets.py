@@ -29,7 +29,7 @@ def marian_tokenize(
         max_length=msrcl,
         pad_to_max_length=True,
         truncation_strategy="only_first",
-        padding="max_length", #TODO(tilo): redundant!!
+        padding="max_length",  # TODO(tilo): redundant!!
     )
     model_inputs: BatchEncoding = tok(src_texts, **tokenizer_kwargs)
     tok.current_spm = tok.spm_target
@@ -37,6 +37,67 @@ def marian_tokenize(
     decoder_inputs: BatchEncoding = tok(tgt_texts, **tokenizer_kwargs)
     tok.current_spm = tok.spm_source
     return decoder_inputs, model_inputs
+
+
+import nlp
+
+
+class Text(nlp.GeneratorBasedBuilder):
+    def _info(self):
+        return nlp.DatasetInfo(features=nlp.Features({"text": nlp.Value("string"),}))
+
+    def _split_generators(self, dl_manager):
+        """ The `datafiles` kwarg in load_dataset() can be a str, List[str], Dict[str,str], or Dict[str,List[str]].
+
+            If str or List[str], then the dataset returns only the 'train' split.
+            If dict, then keys should be from the `nlp.Split` enum.
+        """
+        if isinstance(self.config.data_files, (str, list, tuple)):
+            # Handle case with only one split
+            files = self.config.data_files
+            if isinstance(files, str):
+                files = [files]
+            return [
+                nlp.SplitGenerator(name=nlp.Split.TRAIN, gen_kwargs={"files": files})
+            ]
+        else:
+            # Handle case with several splits and a dict mapping
+            splits = []
+            for split_name in [nlp.Split.TRAIN, nlp.Split.VALIDATION, nlp.Split.TEST]:
+                if split_name in self.config.data_files:
+                    files = self.config.data_files[split_name]
+                    if isinstance(files, str):
+                        files = [files]
+                    splits.append(
+                        nlp.SplitGenerator(name=split_name, gen_kwargs={"files": files})
+                    )
+            return splits
+
+    def _generate_examples(self, files):
+        """ Read files sequentially, then lines sequentially. """
+        idx = 0
+        for filename in files:
+            with open(filename) as file:
+                for line in file:
+                    yield idx, {"text": line}
+                    idx += 1
+
+
+def load_dataset_offline(name, data_files, cache_dir):
+    builder_instance = Text(
+        cache_dir=cache_dir,
+        name=name,
+        version=None,
+        data_dir=None,
+        data_files=data_files,
+        hash=None,
+        features=None,
+    )
+    builder_instance.download_and_prepare(
+        download_config=None, download_mode=None, ignore_verifications=True,
+    )
+    ds = builder_instance.as_dataset(split="train", ignore_verifications=True)
+    return ds
 
 
 class TranslationDataset(Dataset):
@@ -55,21 +116,15 @@ class TranslationDataset(Dataset):
         self.max_src_tgt_len = max_src_tgt_len
 
         path = os.path.join(data_dir, type_path)
-        dummy_split = "train"  # TODO(tilo): WTF!
-        self.src = load_dataset(
-            "text",
-            name=f"{type_path}-src",
-            data_files=[f"{path}.source"],
-            cache_dir="huggingface_cache",
-            split=dummy_split,
+        cache_dir = "huggingface_cache"
+
+        self.src = load_dataset_offline(
+            f"{type_path}-src", [f"{path}.source"], cache_dir
         )
-        self.tgt = load_dataset(
-            "text",
-            name=f"{type_path}-tgt",
-            data_files=[f"{path}.target"],
-            cache_dir="huggingface_cache",
-            split=dummy_split,
+        self.tgt = load_dataset_offline(
+            f"{type_path}-tgt", [f"{path}.target"], cache_dir
         )
+
         self.pad_token_id = tokenizer.pad_token_id
 
     def _preprocess(self, text: str):
