@@ -20,7 +20,6 @@ from lightning_base import BaseTransformer, add_generic_args, generic_train
 from transformers import get_linear_schedule_with_warmup, MBartTokenizer
 
 from seq2seq.utils import (
-    SummarizationDataset,
     lmap,
     flatten_list,
     pickle_save,
@@ -344,7 +343,7 @@ def main(args, model=None) -> Seq2SeqTransformer:
     dataset = Path(args.data_dir).name
     if (
         args.logger == "default"
-        or args.fast_dev_run
+        # or args.fast_dev_run
         or str(args.output_dir).startswith("/tmp")
         or str(args.output_dir).startswith("/var")
     ):
