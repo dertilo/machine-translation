@@ -20,6 +20,7 @@ from lightning_base import BaseTransformer, add_generic_args, generic_train
 from transformers import get_linear_schedule_with_warmup, MBartTokenizer
 
 from seq2seq.utils import (
+    assert_all_frozen,
     lmap,
     flatten_list,
     pickle_save,
@@ -57,9 +58,16 @@ class Seq2SeqTransformer(BaseTransformer):
         if self.hparams.freeze_embeds:
             self.freeze_embeds()
         if self.hparams.freeze_encoder:
-            freeze_params(self.model.model.encoder)  # TODO: this will break for t5
+            freeze_params(self.model.get_encoder())
+            assert_all_frozen(self.model.get_encoder())
+
         self.hparams.git_sha = get_git_info()["repo_sha"]
         self.num_workers = hparams.num_workers
+        self.decoder_start_token_id = None
+        if self.model.config.decoder_start_token_id is None and isinstance(self.tokenizer, MBartTokenizer):
+            self.decoder_start_token_id = self.tokenizer.lang_code_to_id[hparams.tgt_lang]
+            self.model.config.decoder_start_token_id = self.decoder_start_token_id
+
 
     def freeze_embeds(self):
         """Freeze token embeddings and positional embeddings for bart, just token embeddings for t5."""
@@ -133,22 +141,21 @@ class Seq2SeqTransformer(BaseTransformer):
         raise NotImplementedError
 
     def _generative_step(self, batch: dict) -> dict:
-        pad_token_id = self.tokenizer.pad_token_id
-        source_ids, source_mask, y = trim_seq2seq_batch(batch, pad_token_id)
         t0 = time.time()
         generated_ids = self.model.generate(
-            input_ids=source_ids, attention_mask=source_mask, use_cache=True,
+            batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            use_cache=True,
+            decoder_start_token_id=self.decoder_start_token_id,
         )
-        gen_time = (time.time() - t0) / source_ids.shape[0]
-        preds = self.ids_to_clean_text(generated_ids)
-        target = self.ids_to_clean_text(y)
+        gen_time = (time.time() - t0) / batch["input_ids"].shape[0]
+        preds: List[str] = self.ids_to_clean_text(generated_ids)
+        target: List[str] = self.ids_to_clean_text(batch["decoder_input_ids"])
         loss_tensors = self._calc_losses(batch)
         base_metrics = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
         rouge: Dict = self.calc_generative_metrics(preds, target)
         summ_len = np.mean(lmap(len, generated_ids))
-        base_metrics.update(
-            gen_time=gen_time, summ_len=summ_len, preds=preds, target=target, **rouge
-        )
+        base_metrics.update(gen_time=gen_time, gen_len=summ_len, preds=preds, target=target, **rouge)
         return base_metrics
 
     def test_step(self, batch, batch_idx):
