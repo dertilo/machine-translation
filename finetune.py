@@ -1,3 +1,5 @@
+from functools import partial
+
 import shutil
 
 import argparse
@@ -34,10 +36,9 @@ from seq2seq.utils import (
 from seq2seq.callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback
 
 from common import (
-    build_dataloader,
     calc_loss,
     DataSetType,
-    trim_seq2seq_batch,
+    collate_fn,
 )
 from datasets import TranslationDataset
 
@@ -64,10 +65,13 @@ class Seq2SeqTransformer(BaseTransformer):
         self.hparams.git_sha = get_git_info()["repo_sha"]
         self.num_workers = hparams.num_workers
         self.decoder_start_token_id = None
-        if self.model.config.decoder_start_token_id is None and isinstance(self.tokenizer, MBartTokenizer):
-            self.decoder_start_token_id = self.tokenizer.lang_code_to_id[hparams.tgt_lang]
+        if self.model.config.decoder_start_token_id is None and isinstance(
+            self.tokenizer, MBartTokenizer
+        ):
+            self.decoder_start_token_id = self.tokenizer.lang_code_to_id[
+                hparams.tgt_lang
+            ]
             self.model.config.decoder_start_token_id = self.decoder_start_token_id
-
 
     def freeze_embeds(self):
         """Freeze token embeddings and positional embeddings for bart, just token embeddings for t5."""
@@ -155,7 +159,9 @@ class Seq2SeqTransformer(BaseTransformer):
         base_metrics = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
         rouge: Dict = self.calc_generative_metrics(preds, target)
         summ_len = np.mean(lmap(len, generated_ids))
-        base_metrics.update(gen_time=gen_time, gen_len=summ_len, preds=preds, target=target, **rouge)
+        base_metrics.update(
+            gen_time=gen_time, gen_len=summ_len, preds=preds, target=target, **rouge
+        )
         return base_metrics
 
     def test_step(self, batch, batch_idx):
@@ -164,11 +170,9 @@ class Seq2SeqTransformer(BaseTransformer):
     def test_epoch_end(self, outputs):
         return self.validation_epoch_end(outputs, prefix="test")
 
-    def train_dataloader(self) -> DataLoader:
-        dataset = self.build_dataset(DataSetType.train)
-        batch_size = self.hparams.train_batch_size
-
-        if self.hparams.sortish_sampler:
+    def get_dataloader(self, type_path: str, batch_size: int) -> DataLoader:
+        dataset = self.build_dataset(type_path)
+        if self.hparams.sortish_sampler and type_path == "train":
             assert self.hparams.gpus <= 1  # TODO: assert earlier
             sampler = dataset.make_sortish_sampler(batch_size)
             shuffle = False
@@ -176,18 +180,26 @@ class Seq2SeqTransformer(BaseTransformer):
             shuffle = True
             sampler = None
 
-        dataloader = build_dataloader(
-            self.hparams,
+        dataloader = DataLoader(
             dataset,
-            self.tokenizer.pad_token_id,
             batch_size=batch_size,
+            collate_fn=partial(collate_fn, pad_token_id=self.tokenizer.pad_token_id),
             shuffle=shuffle,
+            num_workers=self.hparams.num_workers,
             sampler=sampler,
         )
+        return dataloader
+
+    def train_dataloader(self) -> DataLoader:
+        dataloader = self.get_dataloader("train", batch_size=self.hparams.train_batch_size)
+
         t_total = (
-            (len(dataloader.dataset) // (batch_size * max(1, self.hparams.gpus)))
-            // self.hparams.gradient_accumulation_steps
-            * float(self.hparams.num_train_epochs)
+            (
+                len(dataloader.dataset)
+                // (self.hparams.train_batch_size * max(1, self.hparams.gpus))
+            )
+            // self.hparams.accumulate_grad_batches
+            * float(self.hparams.max_epochs)
         )
         scheduler = get_linear_schedule_with_warmup(
             self.opt,
@@ -198,22 +210,10 @@ class Seq2SeqTransformer(BaseTransformer):
         return dataloader
 
     def val_dataloader(self) -> DataLoader:
-        dataset = self.build_dataset(DataSetType.val)
-        return build_dataloader(
-            self.hparams,
-            dataset,
-            self.tokenizer.pad_token_id,
-            batch_size=self.hparams.eval_batch_size,
-        )
+        return self.get_dataloader("val", batch_size=self.hparams.eval_batch_size)
 
     def test_dataloader(self) -> DataLoader:
-        dataset = self.build_dataset(DataSetType.test)
-        return build_dataloader(
-            self.hparams,
-            dataset,
-            self.tokenizer.pad_token_id,
-            batch_size=self.hparams.eval_batch_size,
-        )
+        return self.get_dataloader("test", batch_size=self.hparams.eval_batch_size)
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
@@ -321,7 +321,7 @@ class TranslationModule(Seq2SeqTransformer):
         dataset = TranslationDataset(
             self.tokenizer,
             type_path=type_path,
-            max_src_tgt_len=(hparams.max_source_length,max_target_length),
+            max_src_tgt_len=(hparams.max_source_length, max_target_length),
             data_dir=hparams.data_dir,
             prefix=self.model.config.prefix or "",
         )
