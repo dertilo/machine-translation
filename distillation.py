@@ -46,6 +46,7 @@ class BartTranslationDistiller(TranslationModule):
         student, student_cfg, teacher = self.pre_init(hparams)
 
         super().__init__(hparams, model=student, config=student_cfg)
+        self.model: BartForConditionalGeneration
         self.teacher: BartForConditionalGeneration = teacher
         # use_task_specific_params(self.teacher, "summarization")
         freeze_params(self.teacher)
@@ -248,6 +249,7 @@ class BartTranslationDistiller(TranslationModule):
             labels=labels,
             output_hidden_states=True,
             output_attentions=False,
+            return_dict=True,  # TODO(tilo): WTF!?
         )
 
         hid_loss_enc, loss_encoder = self._encoder_losses(
@@ -293,6 +295,7 @@ class BartTranslationDistiller(TranslationModule):
                 decoder_input_ids=decoder_input_ids,
                 lm_labels=labels,
                 output_hidden_states=True,
+                return_dict=True,
             )
         dec_mask = decoder_input_ids.ne(pad_token_id)
         loss_ce, _, _ = self.calc_ce_loss(dec_mask, student_out.logits, to.logits)
@@ -315,7 +318,10 @@ class BartTranslationDistiller(TranslationModule):
         if self.different_encoder:
             with torch.no_grad():
                 to_enc: BaseModelOutput = self.teacher.model.encoder(
-                    input_ids, attention_mask=src_mask, output_hidden_states=True
+                    input_ids,
+                    attention_mask=src_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
                 )
             if self.hparams.alpha_encoder_loss > 0:
                 loss_encoder = self.calc_mse_loss(

@@ -98,9 +98,18 @@ class Seq2SeqTransformer(BaseTransformer):
         loss = calc_loss(batch, self.model, self.tokenizer.pad_token_id)
         return (loss,)
 
+    @property
+    def pad(self) -> int:
+        return self.tokenizer.pad_token_id
+
     def training_step(self, batch, batch_idx) -> Dict:
         loss_tensors = self._calc_losses(batch)
         logs = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
+        # tokens per batch
+        logs["tpb"] = (
+            batch["input_ids"].ne(self.pad).sum()
+            + batch["decoder_input_ids"].ne(self.pad).sum()
+        )
         return {"loss": loss_tensors[0], "log": logs}
 
     def validation_step(self, batch, batch_idx) -> Dict:
@@ -114,7 +123,7 @@ class Seq2SeqTransformer(BaseTransformer):
         loss = losses["loss"]
         rouges = {
             k: np.array([x[k] for x in outputs]).mean()
-            for k in self.metric_names + ["gen_time", "summ_len"]
+            for k in self.metric_names + ["gen_time", "gen_len"]
         }
         rouge_tensor: torch.FloatTensor = torch.tensor(rouges[self.val_metric]).type_as(
             loss
@@ -171,7 +180,7 @@ class Seq2SeqTransformer(BaseTransformer):
         return self.validation_epoch_end(outputs, prefix="test")
 
     def get_dataloader(self, type_path: str, batch_size: int) -> DataLoader:
-        dataset = self.build_dataset(type_path)
+        dataset = self.build_dataset(DataSetType[type_path])
         if self.hparams.sortish_sampler and type_path == "train":
             assert self.hparams.gpus <= 1  # TODO: assert earlier
             sampler = dataset.make_sortish_sampler(batch_size)
@@ -191,7 +200,9 @@ class Seq2SeqTransformer(BaseTransformer):
         return dataloader
 
     def train_dataloader(self) -> DataLoader:
-        dataloader = self.get_dataloader("train", batch_size=self.hparams.train_batch_size)
+        dataloader = self.get_dataloader(
+            "train", batch_size=self.hparams.train_batch_size
+        )
 
         t_total = (
             (
