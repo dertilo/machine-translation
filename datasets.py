@@ -1,13 +1,10 @@
 import os
 from typing import Tuple, Union, List
 
-from nlp import load_dataset
 from seq2seq.utils import SortishSampler
 from torch.utils.data import Dataset
 from transformers import (
-    MBartTokenizer,
     AutoTokenizer,
-    BartTokenizer,
     MarianTokenizer,
     BatchEncoding,
 )
@@ -96,7 +93,7 @@ def load_dataset_offline(name, data_files, cache_dir):
     builder_instance.download_and_prepare(
         download_config=None, download_mode=None, ignore_verifications=True,
     )
-    ds = builder_instance.as_dataset(split="train", ignore_verifications=True)
+    ds = builder_instance.as_dataset(split="train")
     return ds
 
 
